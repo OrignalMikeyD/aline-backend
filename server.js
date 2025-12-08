@@ -11,7 +11,7 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'knPeAXsHZ6FVdoLHMtRJ';
-const MODEL_NAME = process.env.MODEL_NAME || 'claude-sonnet-4-20250514';
+const MODEL_NAME = process.env.MODEL_NAME || 'claude-sonnet-4-20250514'; // Ensure this model name is valid in your Anthropic account
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
 
 // Startup logging
@@ -99,20 +99,19 @@ wss.on('connection', (ws) => {
     console.log('Initializing Deepgram connection...');
     
     // Configure for WebM/Opus audio from browser MediaRecorder
-    // The browser's MediaRecorder sends WebM container with Opus codec
-   deepgramConnection = deepgram.listen.live({
-  model: 'nova-2',
-  language: 'en',
-  smart_format: true,
-  interim_results: true,
-  utterance_end_ms: 1500,
-  vad_events: true,
-  endpointing: 300,
-  punctuate: true,
-  encoding: 'linear16',
-  sample_rate: 16000,
-  channels: 1,
-});
+    deepgramConnection = deepgram.listen.live({
+      model: 'nova-2',
+      language: 'en',
+      smart_format: true,
+      interim_results: true,
+      utterance_end_ms: 1000, // Reduced from 1500 to 1000 for snappier response
+      vad_events: true,
+      endpointing: 500,       // Helps detect silence faster
+      punctuate: true,
+      encoding: 'linear16',   // Raw PCM data
+      sample_rate: 48000,     // CHANGED: 48000 is standard for browser mics (vs 16000)
+      channels: 1,
+    });
     
     deepgramConnection.on('open', () => {
       console.log('Deepgram connection opened successfully');
@@ -127,14 +126,14 @@ wss.on('connection', (ws) => {
       const transcript = data.channel?.alternatives?.[0]?.transcript;
       const confidence = data.channel?.alternatives?.[0]?.confidence;
       
-      // Log ALL transcript events for debugging
-      console.log('Transcript event:', {
-        hasTranscript: !!transcript,
-        transcript: transcript || '(empty)',
-        isFinal: data.is_final,
-        confidence: confidence,
-        speechFinal: data.speech_final
-      });
+      // Log transcript for debugging
+      if (transcript) {
+         console.log('Transcript event:', {
+           transcript: transcript,
+           isFinal: data.is_final,
+           confidence: confidence
+         });
+      }
       
       if (transcript && transcript.trim()) {
         // Send to client
@@ -144,7 +143,6 @@ wss.on('connection', (ws) => {
             text: transcript,
             isFinal: data.is_final
           }));
-          console.log('Sent transcript to client:', transcript);
         } catch (e) {
           console.error('Error sending transcript:', e.message);
         }
@@ -157,17 +155,18 @@ wss.on('connection', (ws) => {
     });
     
     deepgramConnection.on('utterance_end', async () => {
-      console.log('Utterance end detected, current transcript:', currentTranscript.trim());
+      console.log('Utterance end detected. Current buffer:', currentTranscript.trim());
       
       if (currentTranscript.trim() && !isResponding) {
         const userMessage = currentTranscript.trim();
-        currentTranscript = '';
+        currentTranscript = ''; // Clear buffer immediately
         
         console.log('Processing user message:', userMessage);
         isResponding = true;
         
         conversationHistory.push({ role: 'user', content: userMessage });
         
+        // Keep history manageable
         if (conversationHistory.length > 20) {
           conversationHistory = conversationHistory.slice(-20);
         }
@@ -180,6 +179,7 @@ wss.on('connection', (ws) => {
           const ttsPromises = [];
           
           console.log('Calling Claude...');
+          // Note: Ensure MODEL_NAME is valid. 'claude-3-sonnet-20240229' is standard if the date-based one fails
           const stream = anthropic.messages.stream({
             model: MODEL_NAME,
             max_tokens: 300,
@@ -193,6 +193,7 @@ wss.on('connection', (ws) => {
             
             ws.send(JSON.stringify({ type: 'response_text', text }));
             
+            // Split by sentence for faster TTS streaming
             const sentenceEnders = /[.!?]\s/;
             if (sentenceEnders.test(ttsBuffer) && ttsBuffer.length > 20) {
               const sentences = ttsBuffer.split(sentenceEnders);
@@ -216,7 +217,7 @@ wss.on('connection', (ws) => {
                     const audioBuffer = await streamToBuffer(audioStream);
                     ws.send(audioBuffer);
                   } catch (err) {
-                    console.error('TTS error:', err);
+                    console.error('TTS error (chunk):', err);
                   }
                 })();
                 
@@ -226,8 +227,9 @@ wss.on('connection', (ws) => {
           });
           
           await stream.finalMessage();
-          console.log('Claude response complete:', fullResponse.substring(0, 100) + '...');
+          console.log('Claude response complete.');
           
+          // Handle remaining text
           if (ttsBuffer.trim()) {
             const cleanText = cleanTextForTTS(ttsBuffer);
             if (cleanText.length > 0) {
@@ -246,7 +248,7 @@ wss.on('connection', (ws) => {
                   const audioBuffer = await streamToBuffer(audioStream);
                   ws.send(audioBuffer);
                 } catch (err) {
-                  console.error('TTS error:', err);
+                  console.error('TTS error (final):', err);
                 }
               })();
               
@@ -257,19 +259,15 @@ wss.on('connection', (ws) => {
           await Promise.all(ttsPromises);
           
           conversationHistory.push({ role: 'assistant', content: fullResponse });
-          
           ws.send(JSON.stringify({ type: 'response_complete' }));
-          console.log('Response sent to client');
-          
-          setTimeout(() => {
-            isResponding = false;
-            console.log('Ready for next input');
-          }, 1500);
           
         } catch (error) {
           console.error('Error processing message:', error);
           ws.send(JSON.stringify({ type: 'error', message: error.message }));
+        } finally {
+          // IMPORTANT: Always reset this so she doesn't get stuck
           isResponding = false;
+          console.log('Ready for next input');
         }
       }
     });
@@ -293,19 +291,18 @@ wss.on('connection', (ws) => {
       audioChunksReceived++;
       
       if (audioChunksReceived === 1) {
-  console.log('First audio chunk received, size:', message.length);
-  // Log first 20 bytes as hex to debug audio format
-  const bytes = Buffer.from(message).slice(0, 20);
-  console.log('First 20 bytes:', bytes.toString('hex'));
-}
-      
-      if (audioChunksReceived % 20 === 0) {
-        console.log('Audio chunks received:', audioChunksReceived);
+        console.log('First audio chunk received, size:', message.length);
+        // Log first 20 bytes as hex to debug audio format
+        const bytes = Buffer.from(message).slice(0, 20);
+        console.log('First 20 bytes:', bytes.toString('hex'));
       }
       
       if (deepgramConnection && !isResponding) {
         try {
-          deepgramConnection.send(message);
+            // Check connection state before sending
+            if (deepgramConnection.getReadyState() === 1) { // 1 = OPEN
+                deepgramConnection.send(message);
+            }
         } catch (err) {
           console.error('Error sending to Deepgram:', err);
         }
