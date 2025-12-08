@@ -69,7 +69,7 @@ wss.on('connection', (ws) => {
   const initDeepgram = () => {
     console.log('Initializing Deepgram connection...');
     
-    // Simple config - let Deepgram auto-detect WebM/Opus format
+    // Configure for WebM/Opus audio from browser MediaRecorder
     deepgramConnection = deepgram.listen.live({
       model: 'nova-2',
       language: 'en',
@@ -79,6 +79,8 @@ wss.on('connection', (ws) => {
       vad_events: true,
       endpointing: 500,
       punctuate: true,
+      encoding: 'opus',
+      sample_rate: 48000,
     });
     
     deepgramConnection.on('open', () => {
