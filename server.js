@@ -293,8 +293,11 @@ wss.on('connection', (ws) => {
       audioChunksReceived++;
       
       if (audioChunksReceived === 1) {
-        console.log('First audio chunk received, size:', message.length);
-      }
+  console.log('First audio chunk received, size:', message.length);
+  // Log first 20 bytes as hex to debug audio format
+  const bytes = Buffer.from(message).slice(0, 20);
+  console.log('First 20 bytes:', bytes.toString('hex'));
+}
       
       if (audioChunksReceived % 20 === 0) {
         console.log('Audio chunks received:', audioChunksReceived);
