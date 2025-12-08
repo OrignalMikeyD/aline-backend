@@ -1,7 +1,6 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { createClient } = require('@deepgram/sdk');
 const Anthropic = require('@anthropic-ai/sdk');
 const ElevenLabs = require('elevenlabs');
 
@@ -20,8 +19,7 @@ console.log('DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Set' : 'MISSING');
 console.log('ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'Set' : 'MISSING');
 console.log('ELEVENLABS_API_KEY:', ELEVENLABS_API_KEY ? 'Set' : 'MISSING');
 
-// Initialize clients
-const deepgram = createClient(DEEPGRAM_API_KEY);
+// Initialize clients (NOT Deepgram SDK - using direct WebSocket)
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const elevenlabs = new ElevenLabs.ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 
@@ -60,121 +58,137 @@ async function streamToBuffer(stream) {
 wss.on('connection', (ws) => {
   console.log('=== Client connected ===');
   
-  let deepgramConnection = null;
+  let deepgramWs = null;
   let conversationHistory = [];
   let isResponding = false;
   let currentTranscript = '';
   let audioChunksReceived = 0;
+  let utteranceTimeout = null;
   
   const initDeepgram = () => {
-    console.log('Initializing Deepgram connection...');
+    console.log('Initializing Deepgram connection (direct WebSocket)...');
     
-    // Configure for WebM/Opus audio from browser MediaRecorder
-    deepgramConnection = deepgram.listen.live({
-      model: 'nova-2',
-      language: 'en',
-      smart_format: true,
-      interim_results: true,
-      utterance_end_ms: 1000,
-      vad_events: true,
-      endpointing: 500,
-      punctuate: true,
-      encoding: 'opus',
-      sample_rate: 48000,
+    // Connect directly to Deepgram WebSocket API
+    const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true`;
+    
+    deepgramWs = new WebSocket(dgUrl, {
+      headers: {
+        'Authorization': `Token ${DEEPGRAM_API_KEY}`
+      }
     });
     
-    deepgramConnection.on('open', () => {
-      console.log('Deepgram connection opened successfully');
+    deepgramWs.on('open', () => {
+      console.log('Deepgram WebSocket opened successfully');
       ws.send(JSON.stringify({ type: 'status', message: 'listening' }));
     });
     
-    deepgramConnection.on('transcript', async (data) => {
-      const transcript = data.channel?.alternatives?.[0]?.transcript;
-      const confidence = data.channel?.alternatives?.[0]?.confidence;
-      
-      console.log('Transcript event:', { transcript: transcript || '(empty)', isFinal: data.is_final, confidence });
-      
-      if (transcript && transcript.trim()) {
-        ws.send(JSON.stringify({ type: 'transcript', text: transcript, isFinal: data.is_final }));
+    deepgramWs.on('message', async (data) => {
+      try {
+        const response = JSON.parse(data.toString());
         
-        if (data.is_final && !isResponding) {
-          currentTranscript += ' ' + transcript;
-          console.log('Accumulated:', currentTranscript.trim());
-        }
-      }
-    });
-    
-    deepgramConnection.on('utterance_end', async () => {
-      console.log('Utterance end, transcript:', currentTranscript.trim());
-      
-      if (currentTranscript.trim() && !isResponding) {
-        const userMessage = currentTranscript.trim();
-        currentTranscript = '';
-        isResponding = true;
-        
-        console.log('Processing:', userMessage);
-        conversationHistory.push({ role: 'user', content: userMessage });
-        
-        if (conversationHistory.length > 20) {
-          conversationHistory = conversationHistory.slice(-20);
-        }
-        
-        try {
-          ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
+        if (response.type === 'Results') {
+          const transcript = response.channel?.alternatives?.[0]?.transcript;
+          const isFinal = response.is_final;
+          const speechFinal = response.speech_final;
           
-          let fullResponse = '';
-          console.log('Calling Claude...');
+          console.log('Transcript:', { transcript: transcript || '(empty)', isFinal, speechFinal });
           
-          const stream = anthropic.messages.stream({
-            model: MODEL_NAME,
-            max_tokens: 300,
-            system: SYSTEM_PROMPT,
-            messages: conversationHistory
-          });
-          
-          stream.on('text', (text) => {
-            fullResponse += text;
-            ws.send(JSON.stringify({ type: 'response_text', text }));
-          });
-          
-          await stream.finalMessage();
-          console.log('Claude response:', fullResponse.substring(0, 100) + '...');
-          
-          // Generate TTS for full response
-          const cleanText = cleanTextForTTS(fullResponse);
-          if (cleanText.length > 0) {
-            console.log('Generating TTS...');
-            const audioStream = await elevenlabs.textToSpeech.convert(
-              ELEVENLABS_VOICE_ID,
-              { text: cleanText, model_id: 'eleven_turbo_v2_5', output_format: 'mp3_44100_128' }
-            );
-            const audioBuffer = await streamToBuffer(audioStream);
-            ws.send(audioBuffer);
-            console.log('TTS sent, size:', audioBuffer.length);
+          if (transcript && transcript.trim()) {
+            ws.send(JSON.stringify({ type: 'transcript', text: transcript, isFinal }));
+            
+            if (isFinal && !isResponding) {
+              currentTranscript += ' ' + transcript;
+              console.log('Accumulated:', currentTranscript.trim());
+              
+              // Reset utterance timeout
+              if (utteranceTimeout) clearTimeout(utteranceTimeout);
+              utteranceTimeout = setTimeout(() => processUtterance(), 1500);
+            }
           }
-          
-          conversationHistory.push({ role: 'assistant', content: fullResponse });
-          ws.send(JSON.stringify({ type: 'response_complete' }));
-          
-        } catch (error) {
-          console.error('Error:', error);
-          ws.send(JSON.stringify({ type: 'error', message: error.message }));
-        } finally {
-          setTimeout(() => {
-            isResponding = false;
-            console.log('Ready for next input');
-          }, 1500);
+        } else if (response.type === 'UtteranceEnd') {
+          console.log('Utterance end received');
+          if (utteranceTimeout) clearTimeout(utteranceTimeout);
+          processUtterance();
+        } else if (response.type === 'SpeechStarted') {
+          console.log('Speech started');
+          if (utteranceTimeout) clearTimeout(utteranceTimeout);
+        } else if (response.type === 'Metadata') {
+          console.log('Metadata:', response);
         }
+      } catch (err) {
+        console.error('Error parsing Deepgram response:', err);
       }
     });
     
-    deepgramConnection.on('error', (error) => {
-      console.error('Deepgram error:', error);
+    deepgramWs.on('error', (error) => {
+      console.error('Deepgram WebSocket error:', error);
     });
     
-    deepgramConnection.on('close', () => {
-      console.log('Deepgram connection closed');
+    deepgramWs.on('close', (code, reason) => {
+      console.log('Deepgram WebSocket closed:', code, reason.toString());
     });
+  };
+  
+  const processUtterance = async () => {
+    if (!currentTranscript.trim() || isResponding) return;
+    
+    const userMessage = currentTranscript.trim();
+    currentTranscript = '';
+    isResponding = true;
+    
+    console.log('Processing:', userMessage);
+    conversationHistory.push({ role: 'user', content: userMessage });
+    
+    if (conversationHistory.length > 20) {
+      conversationHistory = conversationHistory.slice(-20);
+    }
+    
+    try {
+      ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
+      
+      let fullResponse = '';
+      console.log('Calling Claude...');
+      
+      const stream = anthropic.messages.stream({
+        model: MODEL_NAME,
+        max_tokens: 300,
+        system: SYSTEM_PROMPT,
+        messages: conversationHistory
+      });
+      
+      stream.on('text', (text) => {
+        fullResponse += text;
+        ws.send(JSON.stringify({ type: 'response_text', text }));
+      });
+      
+      await stream.finalMessage();
+      console.log('Claude response:', fullResponse.substring(0, 100) + '...');
+      
+      // Generate TTS for full response
+      const cleanText = cleanTextForTTS(fullResponse);
+      if (cleanText.length > 0) {
+        console.log('Generating TTS...');
+        const audioStream = await elevenlabs.textToSpeech.convert(
+          ELEVENLABS_VOICE_ID,
+          { text: cleanText, model_id: 'eleven_turbo_v2_5', output_format: 'mp3_44100_128' }
+        );
+        const audioBuffer = await streamToBuffer(audioStream);
+        ws.send(audioBuffer);
+        console.log('TTS sent, size:', audioBuffer.length);
+      }
+      
+      conversationHistory.push({ role: 'assistant', content: fullResponse });
+      ws.send(JSON.stringify({ type: 'response_complete' }));
+      
+    } catch (error) {
+      console.error('Error:', error);
+      ws.send(JSON.stringify({ type: 'error', message: error.message }));
+    } finally {
+      setTimeout(() => {
+        isResponding = false;
+        console.log('Ready for next input');
+      }, 1500);
+    }
   };
   
   initDeepgram();
@@ -192,8 +206,8 @@ wss.on('connection', (ws) => {
         console.log('Audio chunks:', audioChunksReceived);
       }
       
-      if (deepgramConnection && !isResponding) {
-        deepgramConnection.send(message);
+      if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
+        deepgramWs.send(message);
       }
     }
   });
@@ -201,8 +215,8 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('=== Client disconnected ===');
     console.log('Total chunks:', audioChunksReceived);
-    if (deepgramConnection) {
-      deepgramConnection.finish();
+    if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
+      deepgramWs.close();
     }
   });
   
