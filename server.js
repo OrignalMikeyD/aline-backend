@@ -99,6 +99,7 @@ wss.on('connection', (ws) => {
     console.log('Initializing Deepgram connection...');
     
     // Configure for WebM/Opus audio from browser MediaRecorder
+    // The browser's MediaRecorder sends WebM container with Opus codec
     deepgramConnection = deepgram.listen.live({
       model: 'nova-2',
       language: 'en',
@@ -108,6 +109,9 @@ wss.on('connection', (ws) => {
       vad_events: true,
       endpointing: 300,
       punctuate: true,
+      // Explicitly set encoding for browser MediaRecorder output
+      encoding: 'opus',
+      sample_rate: 48000,
     });
     
     deepgramConnection.on('open', () => {
