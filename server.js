@@ -3,7 +3,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const { createClient } = require('@deepgram/sdk');
 const Anthropic = require('@anthropic-ai/sdk');
-const ElevenLabs = require('elevenlabs');
+const { ElevenLabsClient } = require('elevenlabs');
 
 // Environment variables
 const PORT = process.env.PORT || 3002;
@@ -14,14 +14,27 @@ const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'knPeAXsHZ6FVdoLH
 const MODEL_NAME = process.env.MODEL_NAME || 'claude-sonnet-4-20250514';
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
 
+// Validate required environment variables
+console.log('Starting Aline Voice Backend...');
+console.log('DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Set' : 'MISSING');
+console.log('ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'Set' : 'MISSING');
+console.log('ELEVENLABS_API_KEY:', ELEVENLABS_API_KEY ? 'Set' : 'MISSING');
+
 // Initialize clients
 const deepgram = createClient(DEEPGRAM_API_KEY);
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-const elevenlabs = new ElevenLabs.ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
+const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 
 // Express app
 const app = express();
 app.use(express.json());
+
+// CORS headers for WebSocket
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -90,95 +103,153 @@ async function streamToBuffer(stream) {
 
 // Handle WebSocket connections
 wss.on('connection', (ws) => {
-  console.log('Client connected');
+  console.log('=== Client connected ===');
   
   let deepgramConnection = null;
   let conversationHistory = [];
   let isResponding = false;
   let currentTranscript = '';
+  let deepgramReady = false;
+  let audioChunksReceived = 0;
   
   // Initialize Deepgram live transcription
   const initDeepgram = () => {
-    deepgramConnection = deepgram.listen.live({
-      model: 'nova-2',
-      language: 'en',
-      smart_format: true,
-      interim_results: true,
-      utterance_end_ms: 1500,
-      vad_events: true,
-      endpointing: 300,
-    });
+    console.log('Initializing Deepgram connection...');
     
-    deepgramConnection.on('open', () => {
-      console.log('Deepgram connection opened');
-      ws.send(JSON.stringify({ type: 'status', message: 'listening' }));
-    });
+    try {
+      // For WebM/Opus from browser MediaRecorder
+      deepgramConnection = deepgram.listen.live({
+        model: 'nova-2',
+        language: 'en',
+        smart_format: true,
+        interim_results: true,
+        utterance_end_ms: 1500,
+        vad_events: true,
+        endpointing: 300,
+        // Let Deepgram auto-detect the format from WebM container
+        punctuate: true,
+      });
     
-    deepgramConnection.on('transcript', async (data) => {
-      const transcript = data.channel?.alternatives?.[0]?.transcript;
-      
-      if (transcript && transcript.trim()) {
-        // Send interim transcripts to client
-        ws.send(JSON.stringify({
-          type: 'transcript',
-          text: transcript,
-          isFinal: data.is_final
-        }));
-        
-        if (data.is_final && !isResponding) {
-          currentTranscript += ' ' + transcript;
-        }
-      }
-    });
-    
-    deepgramConnection.on('utterance_end', async () => {
-      if (currentTranscript.trim() && !isResponding) {
-        const userMessage = currentTranscript.trim();
-        currentTranscript = '';
-        
-        console.log('User said:', userMessage);
-        isResponding = true;
-        
-        // Add to conversation history
-        conversationHistory.push({ role: 'user', content: userMessage });
-        
-        // Keep history manageable
-        if (conversationHistory.length > 20) {
-          conversationHistory = conversationHistory.slice(-20);
-        }
-        
+      deepgramConnection.on('open', () => {
+        console.log('Deepgram connection opened successfully');
+        deepgramReady = true;
         try {
-          // Get Claude response with streaming
-          ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
+          ws.send(JSON.stringify({ type: 'status', message: 'listening' }));
+        } catch (e) {
+          console.error('Error sending status to client:', e.message);
+        }
+      });
+    
+      deepgramConnection.on('transcript', async (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        
+        if (transcript && transcript.trim()) {
+          console.log('Transcript:', transcript, '| Final:', data.is_final);
           
-          let fullResponse = '';
-          let ttsBuffer = '';
-          const ttsPromises = [];
+          // Send interim transcripts to client
+          try {
+            ws.send(JSON.stringify({
+              type: 'transcript',
+              text: transcript,
+              isFinal: data.is_final
+            }));
+          } catch (e) {
+            console.error('Error sending transcript:', e.message);
+          }
           
-          const stream = anthropic.messages.stream({
-            model: MODEL_NAME,
-            max_tokens: 300,
-            system: SYSTEM_PROMPT,
-            messages: conversationHistory
-          });
+          if (data.is_final && !isResponding) {
+            currentTranscript += ' ' + transcript;
+          }
+        }
+      });
+    
+      deepgramConnection.on('utterance_end', async () => {
+        console.log('Utterance end detected');
+        
+        if (currentTranscript.trim() && !isResponding) {
+          const userMessage = currentTranscript.trim();
+          currentTranscript = '';
           
-          stream.on('text', async (text) => {
-            fullResponse += text;
-            ttsBuffer += text;
+          console.log('Processing user message:', userMessage);
+          isResponding = true;
+          
+          // Add to conversation history
+          conversationHistory.push({ role: 'user', content: userMessage });
+          
+          // Keep history manageable
+          if (conversationHistory.length > 20) {
+            conversationHistory = conversationHistory.slice(-20);
+          }
+          
+          try {
+            // Get Claude response with streaming
+            ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
             
-            // Send text chunks to client
-            ws.send(JSON.stringify({ type: 'response_text', text }));
+            let fullResponse = '';
+            let ttsBuffer = '';
+            const ttsPromises = [];
             
-            // Process TTS in chunks at sentence boundaries
-            const sentenceEnders = /[.!?]\s/;
-            if (sentenceEnders.test(ttsBuffer) && ttsBuffer.length > 20) {
-              const sentences = ttsBuffer.split(sentenceEnders);
-              const toSpeak = sentences.slice(0, -1).join('. ');
-              ttsBuffer = sentences[sentences.length - 1];
+            console.log('Calling Claude...');
+            const stream = anthropic.messages.stream({
+              model: MODEL_NAME,
+              max_tokens: 300,
+              system: SYSTEM_PROMPT,
+              messages: conversationHistory
+            });
+            
+            stream.on('text', async (text) => {
+              fullResponse += text;
+              ttsBuffer += text;
               
-              const cleanText = cleanTextForTTS(toSpeak);
+              // Send text chunks to client
+              try {
+                ws.send(JSON.stringify({ type: 'response_text', text }));
+              } catch (e) {
+                console.error('Error sending response text:', e.message);
+              }
+              
+              // Process TTS in chunks at sentence boundaries
+              const sentenceEnders = /[.!?]\s/;
+              if (sentenceEnders.test(ttsBuffer) && ttsBuffer.length > 20) {
+                const sentences = ttsBuffer.split(sentenceEnders);
+                const toSpeak = sentences.slice(0, -1).join('. ');
+                ttsBuffer = sentences[sentences.length - 1];
+                
+                const cleanText = cleanTextForTTS(toSpeak);
+                if (cleanText.length > 0) {
+                  console.log('TTS chunk:', cleanText.substring(0, 50) + '...');
+                  
+                  const ttsPromise = (async () => {
+                    try {
+                      const audioStream = await elevenlabs.textToSpeech.convert(
+                        ELEVENLABS_VOICE_ID,
+                        {
+                          text: cleanText,
+                          model_id: 'eleven_turbo_v2_5',
+                          output_format: 'mp3_44100_128'
+                        }
+                      );
+                      const audioBuffer = await streamToBuffer(audioStream);
+                      ws.send(audioBuffer);
+                      console.log('Sent audio chunk:', audioBuffer.length, 'bytes');
+                    } catch (err) {
+                      console.error('TTS error:', err.message);
+                    }
+                  })();
+                  
+                  ttsPromises.push(ttsPromise);
+                }
+              }
+            });
+            
+            await stream.finalMessage();
+            console.log('Claude response complete:', fullResponse.substring(0, 100) + '...');
+            
+            // Process any remaining text in buffer
+            if (ttsBuffer.trim()) {
+              const cleanText = cleanTextForTTS(ttsBuffer);
               if (cleanText.length > 0) {
-                console.log('TTS chunk:', cleanText);
+                console.log('TTS final chunk:', cleanText.substring(0, 50) + '...');
                 
                 const ttsPromise = (async () => {
                   try {
@@ -192,76 +263,59 @@ wss.on('connection', (ws) => {
                     );
                     const audioBuffer = await streamToBuffer(audioStream);
                     ws.send(audioBuffer);
+                    console.log('Sent final audio chunk:', audioBuffer.length, 'bytes');
                   } catch (err) {
-                    console.error('TTS error:', err);
+                    console.error('TTS error:', err.message);
                   }
                 })();
                 
                 ttsPromises.push(ttsPromise);
               }
             }
-          });
-          
-          await stream.finalMessage();
-          
-          // Process any remaining text in buffer
-          if (ttsBuffer.trim()) {
-            const cleanText = cleanTextForTTS(ttsBuffer);
-            if (cleanText.length > 0) {
-              console.log('TTS final chunk:', cleanText);
-              
-              const ttsPromise = (async () => {
-                try {
-                  const audioStream = await elevenlabs.textToSpeech.convert(
-                    ELEVENLABS_VOICE_ID,
-                    {
-                      text: cleanText,
-                      model_id: 'eleven_turbo_v2_5',
-                      output_format: 'mp3_44100_128'
-                    }
-                  );
-                  const audioBuffer = await streamToBuffer(audioStream);
-                  ws.send(audioBuffer);
-                } catch (err) {
-                  console.error('TTS error:', err);
-                }
-              })();
-              
-              ttsPromises.push(ttsPromise);
-            }
-          }
-          
-          // Wait for all TTS to complete
-          await Promise.all(ttsPromises);
-          
-          // Add assistant response to history
-          conversationHistory.push({ role: 'assistant', content: fullResponse });
-          
-          // Signal response complete
-          ws.send(JSON.stringify({ type: 'response_complete' }));
-          console.log('Response complete');
-          
-          // Delay before listening again to prevent feedback
-          setTimeout(() => {
+            
+            // Wait for all TTS to complete
+            await Promise.all(ttsPromises);
+            
+            // Add assistant response to history
+            conversationHistory.push({ role: 'assistant', content: fullResponse });
+            
+            // Signal response complete
+            ws.send(JSON.stringify({ type: 'response_complete' }));
+            console.log('Response complete, resuming listening');
+            
+            // Delay before listening again to prevent feedback
+            setTimeout(() => {
+              isResponding = false;
+            }, 1500);
+            
+          } catch (error) {
+            console.error('Error processing message:', error);
+            try {
+              ws.send(JSON.stringify({ type: 'error', message: error.message }));
+            } catch (e) {}
             isResponding = false;
-          }, 1500);
-          
-        } catch (error) {
-          console.error('Error processing message:', error);
-          ws.send(JSON.stringify({ type: 'error', message: error.message }));
-          isResponding = false;
+          }
         }
-      }
-    });
+      });
     
-    deepgramConnection.on('error', (error) => {
-      console.error('Deepgram error:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Speech recognition error' }));
-    });
+      deepgramConnection.on('error', (error) => {
+        console.error('Deepgram error:', error);
+        try {
+          ws.send(JSON.stringify({ type: 'error', message: 'Speech recognition error' }));
+        } catch (e) {}
+      });
     
-    deepgramConnection.on('close', () => {
-      console.log('Deepgram connection closed');
-    });
+      deepgramConnection.on('close', () => {
+        console.log('Deepgram connection closed');
+        deepgramReady = false;
+      });
+      
+    } catch (initError) {
+      console.error('Failed to initialize Deepgram:', initError);
+      try {
+        ws.send(JSON.stringify({ type: 'error', message: 'Failed to initialize speech recognition' }));
+      } catch (e) {}
+    }
   };
   
   // Start Deepgram connection
@@ -271,11 +325,21 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     // Binary data is audio
     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
-      if (deepgramConnection && !isResponding) {
+      audioChunksReceived++;
+      
+      if (audioChunksReceived === 1) {
+        console.log('First audio chunk received, size:', message.length);
+      }
+      
+      if (audioChunksReceived % 20 === 0) {
+        console.log('Audio chunks received:', audioChunksReceived);
+      }
+      
+      if (deepgramConnection && deepgramReady && !isResponding) {
         try {
-          deepgramConnection.send(message);
+          deepgramConnection.send(Buffer.from(message));
         } catch (err) {
-          console.error('Error sending to Deepgram:', err);
+          console.error('Error sending to Deepgram:', err.message);
         }
       }
     } else {
@@ -293,14 +357,17 @@ wss.on('connection', (ws) => {
   
   // Handle client disconnect
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log('=== Client disconnected ===');
+    console.log('Total audio chunks received:', audioChunksReceived);
     if (deepgramConnection) {
-      deepgramConnection.finish();
+      try {
+        deepgramConnection.finish();
+      } catch (e) {}
     }
   });
   
   ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
+    console.error('WebSocket error:', error.message);
   });
 });
 
