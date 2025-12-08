@@ -1,0 +1,29 @@
+{
+  "name": "aline-voice-backend",
+  "version": "1.0.0",
+  "description": "Voice backend for Aline - Persona iO AI assistant",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@deepgram/sdk": "^3.9.0",
+    "elevenlabs": "^1.50.0",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "keywords": [
+    "voice",
+    "ai",
+    "websocket",
+    "tts",
+    "stt"
+  ],
+  "author": "Persona iO",
+  "license": "MIT"
+}
