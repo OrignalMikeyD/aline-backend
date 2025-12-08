@@ -109,6 +109,8 @@ wss.on('connection', (ws) => {
       vad_events: true,
       endpointing: 300,
       punctuate: true,
+      encoding: 'linear16',
+      sample_rate: 16000,
     });
     
     deepgramConnection.on('open', () => {
