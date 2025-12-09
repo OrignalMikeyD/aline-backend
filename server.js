@@ -10,7 +10,6 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'knPeAXsHZ6FVdoLHMtRJ';
-// Using Haiku for speed, as recommended for voice agents
 const MODEL_NAME = process.env.MODEL_NAME || 'claude-3-haiku-20240307'; 
 
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
@@ -174,6 +173,7 @@ wss.on('connection', (ws) => {
         console.log('Generating TTS...');
         
         // CRITICAL UPDATE FOR SIMLI: Use pcm_16000 format
+        // This is the raw audio Simli needs to drive the face
         const audioStream = await elevenlabs.textToSpeech.convert(
           ELEVENLABS_VOICE_ID,
           { 
