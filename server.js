@@ -10,15 +10,20 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'knPeAXsHZ6FVdoLHMtRJ';
-const MODEL_NAME = process.env.MODEL_NAME || 'claude-3-haiku-20240307'; 
+const MODEL_NAME = process.env.MODEL_NAME || 'claude-3-haiku-20240307';
+
+// Simli requires PCM16 at 16kHz - ElevenLabs pcm_16000 provides exactly this
+const AUDIO_FORMAT = 'pcm_16000';
+const SIMLI_CHUNK_SIZE = 6000; // Simli recommends 6000 byte chunks for optimal streaming
 
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
 
 // Startup logging
-console.log('Starting Aline Voice Backend...');
+console.log('Starting Aline Voice Backend (Simli-Optimized)...');
 console.log('DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Set' : 'MISSING');
 console.log('ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'Set' : 'MISSING');
 console.log('ELEVENLABS_API_KEY:', ELEVENLABS_API_KEY ? 'Set' : 'MISSING');
+console.log('Audio Format:', AUDIO_FORMAT, '(PCM16 @ 16kHz for Simli)');
 
 // Initialize clients
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -28,8 +33,24 @@ const elevenlabs = new ElevenLabs.ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY 
 const app = express();
 app.use(express.json());
 
+// CORS for V0/Vercel deployments
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Aline Voice Backend' });
+  res.json({ 
+    status: 'ok', 
+    service: 'Aline Voice Backend',
+    simli: {
+      audioFormat: 'PCM16',
+      sampleRate: 16000,
+      channels: 1,
+      chunkSize: SIMLI_CHUNK_SIZE
+    }
+  });
 });
 
 app.get('/health', (req, res) => {
@@ -42,18 +63,41 @@ const wss = new WebSocket.Server({ server });
 function cleanTextForTTS(text) {
   if (!text) return '';
   let cleaned = text;
-  cleaned = cleaned.replace(/\[[^\]]*\]/g, ''); // Remove brackets
-  cleaned = cleaned.replace(/\*[^*]*\*/g, '');   // Remove asterisks
-  cleaned = cleaned.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+  cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
+  cleaned = cleaned.replace(/\*[^*]*\*/g, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
   return cleaned;
 }
 
-async function streamToBuffer(stream) {
-  const chunks = [];
-  for await (const chunk of stream) {
-    chunks.push(chunk);
+// Stream audio in Simli-optimal chunks (6000 bytes)
+async function streamAudioToClient(ws, audioStream) {
+  let buffer = Buffer.alloc(0);
+  let totalBytesSent = 0;
+  
+  for await (const chunk of audioStream) {
+    buffer = Buffer.concat([buffer, chunk]);
+    
+    // Send in optimal chunk sizes for Simli
+    while (buffer.length >= SIMLI_CHUNK_SIZE) {
+      const audioChunk = buffer.slice(0, SIMLI_CHUNK_SIZE);
+      buffer = buffer.slice(SIMLI_CHUNK_SIZE);
+      
+      // Send as binary with type identifier
+      ws.send(JSON.stringify({ type: 'audio_chunk', size: audioChunk.length }));
+      ws.send(audioChunk);
+      totalBytesSent += audioChunk.length;
+    }
   }
-  return Buffer.concat(chunks);
+  
+  // Send remaining audio
+  if (buffer.length > 0) {
+    ws.send(JSON.stringify({ type: 'audio_chunk', size: buffer.length }));
+    ws.send(buffer);
+    totalBytesSent += buffer.length;
+  }
+  
+  console.log(`Streamed ${totalBytesSent} bytes in Simli-optimized chunks`);
+  return totalBytesSent;
 }
 
 wss.on('connection', (ws) => {
@@ -67,10 +111,8 @@ wss.on('connection', (ws) => {
   let utteranceTimeout = null;
   
   const initDeepgram = () => {
-    console.log('Initializing Deepgram connection (direct WebSocket)...');
+    console.log('Initializing Deepgram connection...');
     
-    // Connect directly to Deepgram WebSocket API
-    // Nova-2 is the fastest model for real-time
     const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true`;
     
     deepgramWs = new WebSocket(dgUrl, {
@@ -80,7 +122,7 @@ wss.on('connection', (ws) => {
     });
     
     deepgramWs.on('open', () => {
-      console.log('Deepgram WebSocket opened successfully');
+      console.log('Deepgram WebSocket opened');
       ws.send(JSON.stringify({ type: 'status', message: 'listening' }));
     });
     
@@ -91,43 +133,33 @@ wss.on('connection', (ws) => {
         if (response.type === 'Results') {
           const transcript = response.channel?.alternatives?.[0]?.transcript;
           const isFinal = response.is_final;
-          const speechFinal = response.speech_final;
-          
-          console.log('Transcript:', { transcript: transcript || '(empty)', isFinal, speechFinal });
           
           if (transcript && transcript.trim()) {
             ws.send(JSON.stringify({ type: 'transcript', text: transcript, isFinal }));
             
             if (isFinal && !isResponding) {
               currentTranscript += ' ' + transcript;
-              console.log('Accumulated:', currentTranscript.trim());
-              
-              // Reset utterance timeout
               if (utteranceTimeout) clearTimeout(utteranceTimeout);
               utteranceTimeout = setTimeout(() => processUtterance(), 1500);
             }
           }
         } else if (response.type === 'UtteranceEnd') {
-          console.log('Utterance end received');
           if (utteranceTimeout) clearTimeout(utteranceTimeout);
           processUtterance();
         } else if (response.type === 'SpeechStarted') {
-          console.log('Speech started');
           if (utteranceTimeout) clearTimeout(utteranceTimeout);
-        } else if (response.type === 'Metadata') {
-          console.log('Metadata:', response);
         }
       } catch (err) {
-        console.error('Error parsing Deepgram response:', err);
+        console.error('Deepgram parse error:', err);
       }
     });
     
     deepgramWs.on('error', (error) => {
-      console.error('Deepgram WebSocket error:', error);
+      console.error('Deepgram error:', error);
     });
     
     deepgramWs.on('close', (code, reason) => {
-      console.log('Deepgram WebSocket closed:', code, reason.toString());
+      console.log('Deepgram closed:', code);
     });
   };
   
@@ -141,7 +173,6 @@ wss.on('connection', (ws) => {
     console.log('Processing:', userMessage);
     conversationHistory.push({ role: 'user', content: userMessage });
     
-    // Keep context window manageable
     if (conversationHistory.length > 20) {
       conversationHistory = conversationHistory.slice(-20);
     }
@@ -150,7 +181,6 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
       
       let fullResponse = '';
-      console.log('Calling Claude...');
       
       const stream = anthropic.messages.stream({
         model: MODEL_NAME,
@@ -165,30 +195,28 @@ wss.on('connection', (ws) => {
       });
       
       await stream.finalMessage();
-      console.log('Claude response:', fullResponse.substring(0, 100) + '...');
+      console.log('Claude:', fullResponse.substring(0, 80) + '...');
       
-      // Generate TTS for full response
       const cleanText = cleanTextForTTS(fullResponse);
       if (cleanText.length > 0) {
-        console.log('Generating TTS...');
+        ws.send(JSON.stringify({ type: 'status', message: 'speaking' }));
         
-        // CRITICAL UPDATE FOR SIMLI: Use pcm_16000 format
-        // This is the raw audio Simli needs to drive the face
+        // Generate TTS - PCM16 @ 16kHz for Simli
         const audioStream = await elevenlabs.textToSpeech.convert(
           ELEVENLABS_VOICE_ID,
           { 
             text: cleanText, 
             model_id: 'eleven_turbo_v2_5', 
-            output_format: 'pcm_16000' 
+            output_format: AUDIO_FORMAT
           }
         );
         
-        const audioBuffer = await streamToBuffer(audioStream);
-        ws.send(audioBuffer);
-        console.log('TTS sent, size:', audioBuffer.length);
+        // Stream in Simli-optimal chunks
+        await streamAudioToClient(ws, audioStream);
       }
       
       conversationHistory.push({ role: 'assistant', content: fullResponse });
+      ws.send(JSON.stringify({ type: 'audio_complete' }));
       ws.send(JSON.stringify({ type: 'response_complete' }));
       
     } catch (error) {
@@ -197,8 +225,8 @@ wss.on('connection', (ws) => {
     } finally {
       setTimeout(() => {
         isResponding = false;
-        console.log('Ready for next input');
-      }, 1500);
+        ws.send(JSON.stringify({ type: 'status', message: 'listening' }));
+      }, 500);
     }
   };
   
@@ -208,15 +236,6 @@ wss.on('connection', (ws) => {
     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
       audioChunksReceived++;
       
-      if (audioChunksReceived === 1) {
-        console.log('First audio chunk, size:', message.length);
-        console.log('First 20 bytes:', Buffer.from(message).slice(0, 20).toString('hex'));
-      }
-      
-      if (audioChunksReceived % 20 === 0) {
-        console.log('Audio chunks:', audioChunksReceived);
-      }
-      
       if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
         deepgramWs.send(message);
       }
@@ -225,7 +244,6 @@ wss.on('connection', (ws) => {
   
   ws.on('close', () => {
     console.log('=== Client disconnected ===');
-    console.log('Total chunks:', audioChunksReceived);
     if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
       deepgramWs.close();
     }
@@ -238,5 +256,5 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log(`Aline Voice Backend running on port ${PORT}`);
-  console.log('WebSocket server ready');
+  console.log('Ready for Simli integration');
 });
