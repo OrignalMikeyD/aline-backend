@@ -109,9 +109,15 @@ wss.on('connection', (ws) => {
   let currentTranscript = '';
   let audioChunksReceived = 0;
   let utteranceTimeout = null;
+  let deepgramInitialized = false;
   
   const initDeepgram = () => {
+    if (deepgramInitialized && deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
+      return; // Already connected
+    }
+    
     console.log('Initializing Deepgram connection...');
+    deepgramInitialized = true;
     
     // FIXED: Added encoding=linear16 and sample_rate=16000 to match browser audio format
     const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true&encoding=linear16&sample_rate=16000`;
@@ -161,10 +167,12 @@ wss.on('connection', (ws) => {
     
     deepgramWs.on('error', (error) => {
       console.error('Deepgram error:', error);
+      deepgramInitialized = false;
     });
     
     deepgramWs.on('close', (code, reason) => {
       console.log('Deepgram closed:', code);
+      deepgramInitialized = false;
     });
   };
   
@@ -235,22 +243,33 @@ wss.on('connection', (ws) => {
     }
   };
   
-  initDeepgram();
+  // Don't initialize Deepgram immediately - wait for first audio chunk
+  ws.send(JSON.stringify({ type: 'status', message: 'ready' }));
   
   ws.on('message', (message) => {
     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
       audioChunksReceived++;
       
-      // Log audio reception
+      // Initialize Deepgram on first audio chunk
       if (audioChunksReceived === 1) {
         console.log('First audio chunk received, size:', message.length);
+        initDeepgram();
       }
+      
       if (audioChunksReceived % 50 === 0) {
         console.log('Audio chunks received:', audioChunksReceived);
       }
       
+      // Wait for Deepgram to be ready before sending
       if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
         deepgramWs.send(message);
+      } else if (audioChunksReceived <= 10) {
+        // Buffer first few chunks while Deepgram connects
+        setTimeout(() => {
+          if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
+            deepgramWs.send(message);
+          }
+        }, 100);
       }
     }
   });
