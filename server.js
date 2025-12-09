@@ -119,9 +119,9 @@ wss.on('connection', (ws) => {
     console.log('Initializing Deepgram connection...');
     deepgramInitialized = true;
     
-    // Browser AudioContext typically uses 48000Hz (or 44100Hz on some systems)
-    // Using 48000 as it's the most common for modern browsers
-    const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true&encoding=linear16&sample_rate=48000`;
+    // Browser AudioContext is set to 16000Hz (confirmed from console logs)
+    // PCM16 linear encoding at 16kHz sample rate
+    const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true&encoding=linear16&sample_rate=16000`;
     
     deepgramWs = new WebSocket(dgUrl, {
       headers: {
