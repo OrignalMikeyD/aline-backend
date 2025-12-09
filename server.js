@@ -10,7 +10,9 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'knPeAXsHZ6FVdoLHMtRJ';
-const MODEL_NAME = process.env.MODEL_NAME || 'claude-sonnet-4-20250514';
+// Using Haiku for speed, as recommended for voice agents
+const MODEL_NAME = process.env.MODEL_NAME || 'claude-3-haiku-20240307'; 
+
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
 
 // Startup logging
@@ -19,7 +21,7 @@ console.log('DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Set' : 'MISSING');
 console.log('ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'Set' : 'MISSING');
 console.log('ELEVENLABS_API_KEY:', ELEVENLABS_API_KEY ? 'Set' : 'MISSING');
 
-// Initialize clients (NOT Deepgram SDK - using direct WebSocket)
+// Initialize clients
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const elevenlabs = new ElevenLabs.ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 
@@ -41,9 +43,9 @@ const wss = new WebSocket.Server({ server });
 function cleanTextForTTS(text) {
   if (!text) return '';
   let cleaned = text;
-  cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
-  cleaned = cleaned.replace(/\*[^*]*\*/g, '');
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  cleaned = cleaned.replace(/\[[^\]]*\]/g, ''); // Remove brackets
+  cleaned = cleaned.replace(/\*[^*]*\*/g, '');   // Remove asterisks
+  cleaned = cleaned.replace(/\s+/g, ' ').trim(); // Normalize whitespace
   return cleaned;
 }
 
@@ -69,6 +71,7 @@ wss.on('connection', (ws) => {
     console.log('Initializing Deepgram connection (direct WebSocket)...');
     
     // Connect directly to Deepgram WebSocket API
+    // Nova-2 is the fastest model for real-time
     const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true`;
     
     deepgramWs = new WebSocket(dgUrl, {
@@ -139,6 +142,7 @@ wss.on('connection', (ws) => {
     console.log('Processing:', userMessage);
     conversationHistory.push({ role: 'user', content: userMessage });
     
+    // Keep context window manageable
     if (conversationHistory.length > 20) {
       conversationHistory = conversationHistory.slice(-20);
     }
@@ -168,10 +172,17 @@ wss.on('connection', (ws) => {
       const cleanText = cleanTextForTTS(fullResponse);
       if (cleanText.length > 0) {
         console.log('Generating TTS...');
+        
+        // CRITICAL UPDATE FOR SIMLI: Use pcm_16000 format
         const audioStream = await elevenlabs.textToSpeech.convert(
           ELEVENLABS_VOICE_ID,
-          { text: cleanText, model_id: 'eleven_turbo_v2_5', output_format: 'mp3_44100_128' }
+          { 
+            text: cleanText, 
+            model_id: 'eleven_turbo_v2_5', 
+            output_format: 'pcm_16000' 
+          }
         );
+        
         const audioBuffer = await streamToBuffer(audioStream);
         ws.send(audioBuffer);
         console.log('TTS sent, size:', audioBuffer.length);
