@@ -113,7 +113,8 @@ wss.on('connection', (ws) => {
   const initDeepgram = () => {
     console.log('Initializing Deepgram connection...');
     
-    const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true`;
+    // FIXED: Added encoding=linear16 and sample_rate=16000 to match browser audio format
+    const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&interim_results=true&utterance_end_ms=1000&vad_events=true&endpointing=500&punctuate=true&encoding=linear16&sample_rate=16000`;
     
     deepgramWs = new WebSocket(dgUrl, {
       headers: {
@@ -134,6 +135,8 @@ wss.on('connection', (ws) => {
           const transcript = response.channel?.alternatives?.[0]?.transcript;
           const isFinal = response.is_final;
           
+          console.log('Transcript:', transcript, 'isFinal:', isFinal);
+          
           if (transcript && transcript.trim()) {
             ws.send(JSON.stringify({ type: 'transcript', text: transcript, isFinal }));
             
@@ -144,9 +147,11 @@ wss.on('connection', (ws) => {
             }
           }
         } else if (response.type === 'UtteranceEnd') {
+          console.log('Utterance ended');
           if (utteranceTimeout) clearTimeout(utteranceTimeout);
           processUtterance();
         } else if (response.type === 'SpeechStarted') {
+          console.log('Speech started');
           if (utteranceTimeout) clearTimeout(utteranceTimeout);
         }
       } catch (err) {
@@ -236,6 +241,14 @@ wss.on('connection', (ws) => {
     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
       audioChunksReceived++;
       
+      // Log audio reception
+      if (audioChunksReceived === 1) {
+        console.log('First audio chunk received, size:', message.length);
+      }
+      if (audioChunksReceived % 50 === 0) {
+        console.log('Audio chunks received:', audioChunksReceived);
+      }
+      
       if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
         deepgramWs.send(message);
       }
@@ -244,6 +257,7 @@ wss.on('connection', (ws) => {
   
   ws.on('close', () => {
     console.log('=== Client disconnected ===');
+    console.log('Total audio chunks received:', audioChunksReceived);
     if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
       deepgramWs.close();
     }
