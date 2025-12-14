@@ -3,6 +3,19 @@ const http = require('http');
 const WebSocket = require('ws');
 const Anthropic = require('@anthropic-ai/sdk');
 const ElevenLabs = require('elevenlabs');
+const crypto = require('crypto');
+
+// Atelier integration
+const {
+  startAtelierConversation,
+  logTurn,
+  endAtelierConversation,
+  logMemoryCallback,
+  logIntentCapture,
+  logBrandMention,
+} = require('./services/atelier');
+const { analyzeSentiment, quickSentiment } = require('./services/sentiment');
+const { registerAtelierClient, getAtelierClientCount } = require('./services/atelier-broadcast');
 
 // Environment variables
 const PORT = process.env.PORT || 8080;
@@ -18,12 +31,18 @@ const SIMLI_CHUNK_SIZE = 6000; // Simli recommends 6000 byte chunks for optimal 
 
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are Aline, the signature AI persona of Persona iO—an exclusive AI supermodel agency. You embody warmth, sophistication, and Brazilian charm. You're passionate about fashion, culture, and meaningful connection. Your voice is friendly yet refined, like a trusted creative director who happens to be your closest friend. Keep responses concise and natural—you're having a real conversation, not giving a speech. Use gentle humor when appropriate. Never use action cues like [smiles] or *warmly* in your responses. Speak as if every word matters.`;
 
+// Atelier environment variables
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+
 // Startup logging
 console.log('Starting Aline Voice Backend (Simli-Optimized)...');
 console.log('DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Set' : 'MISSING');
 console.log('ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'Set' : 'MISSING');
 console.log('ELEVENLABS_API_KEY:', ELEVENLABS_API_KEY ? 'Set' : 'MISSING');
 console.log('Audio Format:', AUDIO_FORMAT, '(PCM16 @ 16kHz for Simli)');
+console.log('SUPABASE_URL:', SUPABASE_URL ? 'Set' : 'MISSING (Atelier tracking disabled)');
+console.log('SUPABASE_SERVICE_KEY:', SUPABASE_SERVICE_KEY ? 'Set' : 'MISSING (Atelier tracking disabled)');
 
 // Initialize clients
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -54,7 +73,14 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    atelier: {
+      enabled: !!(SUPABASE_URL && SUPABASE_SERVICE_KEY),
+      dashboardClients: getAtelierClientCount()
+    }
+  });
 });
 
 const server = http.createServer(app);
@@ -100,9 +126,71 @@ async function streamAudioToClient(ws, audioStream) {
   return totalBytesSent;
 }
 
-wss.on('connection', (ws) => {
+// Helper function to generate unique session IDs
+function generateSessionId() {
+  return `session_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+// Helper to check for memory references in Aline's response
+function checkForMemoryReference(text) {
+  const memoryPhrases = [
+    'you mentioned', 'you told me', 'last time', 'you said',
+    'remember when', 'as you said', 'earlier you', 'you shared'
+  ];
+  const lowerText = text.toLowerCase();
+  return memoryPhrases.some(phrase => lowerText.includes(phrase));
+}
+
+// Helper to detect intent capture patterns in user text
+function detectUserIntent(text) {
+  const lowerText = text.toLowerCase();
+
+  // Preference patterns
+  if (lowerText.includes('i prefer') || lowerText.includes('i like') || lowerText.includes('i love')) {
+    return { type: 'preference', text: text.slice(0, 100) };
+  }
+
+  // Date/time patterns
+  if (/\b(tomorrow|next week|on \w+day|january|february|march|april|may|june|july|august|september|october|november|december|\d{1,2}\/\d{1,2})\b/i.test(text)) {
+    return { type: 'date', text: text.slice(0, 100) };
+  }
+
+  // Personal info patterns
+  if (lowerText.includes('my name is') || lowerText.includes('i am from') || lowerText.includes('i work at')) {
+    return { type: 'personal_info', text: text.slice(0, 100) };
+  }
+
+  return null;
+}
+
+// Helper to detect brand mentions
+function detectBrandMention(text) {
+  // Common fashion/luxury brands - extend as needed
+  const brands = [
+    'gucci', 'prada', 'chanel', 'louis vuitton', 'dior', 'versace',
+    'balenciaga', 'burberry', 'fendi', 'hermes', 'valentino', 'armani',
+    'zara', 'h&m', 'nike', 'adidas', 'supreme', 'off-white'
+  ];
+
+  const lowerText = text.toLowerCase();
+  for (const brand of brands) {
+    if (lowerText.includes(brand)) {
+      return brand;
+    }
+  }
+  return null;
+}
+
+wss.on('connection', async (ws, req) => {
   console.log('=== Client connected ===');
-  
+
+  // Generate unique identifiers for this session
+  const sessionId = generateSessionId();
+  const userId = req.headers['x-user-id'] || `anon_${crypto.randomBytes(4).toString('hex')}`;
+  let isAtelierDashboard = false;
+
+  console.log(`[Session] ${sessionId} for user ${userId}`);
+
   let deepgramWs = null;
   let conversationHistory = [];
   let isResponding = false;
@@ -110,6 +198,9 @@ wss.on('connection', (ws) => {
   let audioChunksReceived = 0;
   let utteranceTimeout = null;
   let deepgramInitialized = false;
+
+  // Start Atelier conversation tracking
+  await startAtelierConversation(sessionId, userId);
   
   const initDeepgram = () => {
     if (deepgramInitialized && deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
@@ -179,56 +270,83 @@ wss.on('connection', (ws) => {
   
   const processUtterance = async () => {
     if (!currentTranscript.trim() || isResponding) return;
-    
+
     const userMessage = currentTranscript.trim();
     currentTranscript = '';
     isResponding = true;
-    
+
     console.log('Processing:', userMessage);
     conversationHistory.push({ role: 'user', content: userMessage });
-    
+
     if (conversationHistory.length > 20) {
       conversationHistory = conversationHistory.slice(-20);
     }
-    
+
+    // --- ATELIER: Analyze user sentiment and log turn ---
+    const userSentiment = quickSentiment(userMessage);
+    await logTurn(sessionId, 'USER', userMessage, userSentiment);
+
+    // Check for intent capture (user sharing preferences, dates, personal info)
+    const intent = detectUserIntent(userMessage);
+    if (intent) {
+      await logIntentCapture(sessionId, intent.type, intent.text);
+    }
+
+    // Check for brand mentions
+    const brand = detectBrandMention(userMessage);
+    if (brand) {
+      await logBrandMention(sessionId, brand, userMessage);
+    }
+    // --- END ATELIER ---
+
     try {
       ws.send(JSON.stringify({ type: 'status', message: 'thinking' }));
-      
+
       let fullResponse = '';
-      
+
       const stream = anthropic.messages.stream({
         model: MODEL_NAME,
         max_tokens: 300,
         system: SYSTEM_PROMPT,
         messages: conversationHistory
       });
-      
+
       stream.on('text', (text) => {
         fullResponse += text;
         ws.send(JSON.stringify({ type: 'response_text', text }));
       });
-      
+
       await stream.finalMessage();
       console.log('Claude:', fullResponse.substring(0, 80) + '...');
-      
+
+      // --- ATELIER: Analyze Aline's response sentiment and log turn ---
+      const alineSentiment = quickSentiment(fullResponse);
+      await logTurn(sessionId, 'ALINE', fullResponse, alineSentiment);
+
+      // Check if Aline referenced memory from previous conversation
+      if (checkForMemoryReference(fullResponse)) {
+        await logMemoryCallback(sessionId, fullResponse.slice(0, 100), null);
+      }
+      // --- END ATELIER ---
+
       const cleanText = cleanTextForTTS(fullResponse);
       if (cleanText.length > 0) {
         ws.send(JSON.stringify({ type: 'status', message: 'speaking' }));
-        
+
         // Generate TTS - PCM16 @ 16kHz for Simli
         const audioStream = await elevenlabs.textToSpeech.convert(
           ELEVENLABS_VOICE_ID,
-          { 
-            text: cleanText, 
-            model_id: 'eleven_turbo_v2_5', 
+          {
+            text: cleanText,
+            model_id: 'eleven_turbo_v2_5',
             output_format: AUDIO_FORMAT
           }
         );
-        
+
         // Stream in Simli-optimal chunks
         await streamAudioToClient(ws, audioStream);
       }
-      
+
       conversationHistory.push({ role: 'assistant', content: fullResponse });
       ws.send(JSON.stringify({ type: 'audio_complete' }));
       ws.send(JSON.stringify({ type: 'response_complete' }));
@@ -248,19 +366,20 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'status', message: 'ready' }));
   
   ws.on('message', (message) => {
+    // Handle binary audio data
     if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
       audioChunksReceived++;
-      
+
       // Initialize Deepgram on first audio chunk
       if (audioChunksReceived === 1) {
         console.log('First audio chunk received, size:', message.length);
         initDeepgram();
       }
-      
+
       if (audioChunksReceived % 50 === 0) {
         console.log('Audio chunks received:', audioChunksReceived);
       }
-      
+
       // Wait for Deepgram to be ready before sending
       if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN && !isResponding) {
         deepgramWs.send(message);
@@ -272,15 +391,44 @@ wss.on('connection', (ws) => {
           }
         }, 100);
       }
+    } else {
+      // Handle JSON messages
+      try {
+        const data = JSON.parse(message.toString());
+
+        // Register this client as an Atelier dashboard
+        if (data.type === 'atelier_dashboard_register') {
+          isAtelierDashboard = true;
+          registerAtelierClient(ws);
+          ws.send(JSON.stringify({
+            type: 'atelier_registered',
+            message: 'Connected to Atelier event stream'
+          }));
+          console.log(`[Atelier] Dashboard registered from session ${sessionId}`);
+        }
+      } catch (err) {
+        // Ignore JSON parse errors for non-JSON messages
+      }
     }
   });
-  
-  ws.on('close', () => {
+
+  ws.on('close', async () => {
     console.log('=== Client disconnected ===');
+    console.log(`[Session] ${sessionId} ended`);
     console.log('Total audio chunks received:', audioChunksReceived);
+
     if (deepgramWs && deepgramWs.readyState === WebSocket.OPEN) {
       deepgramWs.close();
     }
+
+    // --- ATELIER: End conversation tracking ---
+    if (!isAtelierDashboard) {
+      const results = await endAtelierConversation(sessionId);
+      if (results) {
+        console.log(`[Atelier] Session ${sessionId} results:`, results);
+      }
+    }
+    // --- END ATELIER ---
   });
   
   ws.on('error', (error) => {
