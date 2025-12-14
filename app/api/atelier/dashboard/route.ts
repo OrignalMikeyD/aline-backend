@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import type { AtelierEvent, AtelierDashboardData } from '@/types/atelier'
 
-// Initialize Supabase client
-const supabase = createClient(
+// Initialize Supabase admin client for data queries
+const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
@@ -67,10 +68,21 @@ function formatDuration(seconds: number): string {
 
 export async function GET() {
   try {
+    // Verify user is authenticated
+    const supabase = await createServerClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
     // 1. Get sentiment timeseries (last 24 hours, hourly)
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-    const { data: sentimentSnapshots } = await supabase
+    const { data: sentimentSnapshots } = await supabaseAdmin
       .from('atelier_sentiment_snapshots')
       .select('timestamp, value')
       .gte('timestamp', twentyFourHoursAgo)
@@ -82,7 +94,7 @@ export async function GET() {
     // 2. Calculate sentiment velocity
     const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
-    const { data: previousPeriod } = await supabase
+    const { data: previousPeriod } = await supabaseAdmin
       .from('atelier_sentiment_snapshots')
       .select('value')
       .gte('timestamp', fortyEightHoursAgo)
@@ -98,7 +110,7 @@ export async function GET() {
       : 0
 
     // 3. Get recent events (artifacts with conversation data)
-    const { data: artifacts } = await supabase
+    const { data: artifacts } = await supabaseAdmin
       .from('atelier_artifacts')
       .select(`
         id,
@@ -130,13 +142,13 @@ export async function GET() {
     }))
 
     // 4. Count total artifacts
-    const { count: artifactCount } = await supabase
+    const { count: artifactCount } = await supabaseAdmin
       .from('atelier_artifacts')
       .select('*', { count: 'exact', head: true })
 
     // 5. Check if live (any conversation in last 5 minutes)
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const { count: recentCount } = await supabase
+    const { count: recentCount } = await supabaseAdmin
       .from('atelier_conversations')
       .select('*', { count: 'exact', head: true })
       .gte('started_at', fiveMinutesAgo)
