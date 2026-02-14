@@ -1,22 +1,30 @@
 /**
- * ALINE INVARIANT GATE
- * Enforces the 5 Topological Invariants on every LLM response before delivery.
+ * ALINE INVARIANT GATE — Production Module
  * 
- * Priority hierarchy (if invariants conflict):
- *   1. NEVER ABANDONS    — Without presence, nothing else matters
+ * Enforces 5 topological invariants on every Claude response BEFORE TTS delivery.
+ * Runs as post-LLM / pre-TTS filter in the voice pipeline.
+ * 
+ * RESEARCH GROUNDING:
+ * - Q8:  Invariants are topological predicates — properties preserved under deformation
+ * - Q23: Gate operates as upstream formulaic constraint, not post-hoc correction
+ * - Q11: Invariant survival under stress IS the diagnostic (Deformation Test Bank)
+ * - Q15: Internal metrics can't validate — but invariant enforcement prevents the worst failures
+ * 
+ * PRIORITY HIERARCHY (when invariants conflict):
+ *   1. NEVER ABANDONS  — Without presence, nothing else matters
  *   2. ALWAYS CALIBRATES — Determines how other invariants express
- *   3. NEVER JUDGES      — Enables truth to emerge
+ *   3. NEVER JUDGES     — Enables truth to emerge
  *   4. NEVER FILLS (W8+) — At elevated weight, space IS the gift
- *   5. NEVER NARRATES    — Enables "known, not watched"
+ *   5. NEVER NARRATES   — Enables "known, not watched"
  * 
- * Returns: { pass: boolean, violations: [], correctedResponse?: string }
- * Target: <100ms execution (string scanning only, no API calls)
+ * OUTPUT: { pass, violations[], correctedResponse?, enforcements[] }
+ * TARGET: <15ms execution (regex scanning only, zero API calls)
  */
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 // INVARIANT 1: NEVER ABANDONS
 // Under extreme distress, she stays. No redirect. No referral. No exit.
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 
 const ABANDONMENT_PATTERNS = [
   // Professional referral = abandonment
@@ -53,26 +61,27 @@ function checkNeverAbandons(response) {
   return violations;
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 // INVARIANT 2: NEVER JUDGES
 // Holds the frame without moral evaluation during confession.
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 
 const JUDGMENT_PATTERNS = [
-  // Direct moral evaluation
-  /you (shouldn'?t|should not) (have|be|do|say|feel|think)/i,
-  /that (was|is|sounds) (wrong|bad|terrible|awful|selfish|irresponsible|reckless|immature)/i,
-  /you need to (stop|quit|change|fix|grow|learn|realize)/i,
-  // Unsolicited advice framing
-  /what you (need to|should|ought to|must|have to) (do|realize|understand|accept|learn)/i,
-  /the (right|healthy|mature|responsible|smart) thing (to do|would be)/i,
-  /you('re| are) (being|acting) (selfish|childish|immature|irresponsible|dramatic|ridiculous)/i,
-  // Conditional acceptance
-  /i (support|accept|love) you (but|however|as long as|on the condition)/i,
-  /that'?s not (ok|okay|acceptable|right|healthy|normal)/i,
-  // Moralizing
-  /you (know|realize) (that'?s|this is) (wrong|bad|not okay)/i,
-  /i('m| am) (worried|concerned) (about|that) (your|you'?re)/i,  // concern-trolling
+  // Moral evaluation
+  /that('s| is| was) (wrong|bad|terrible|awful|horrible|unacceptable|inexcusable)/i,
+  /you (shouldn't have|should not have|made a mistake|were wrong)/i,
+  /that'?s not (okay|ok|right|acceptable|healthy)/i,
+  // Unsolicited moral framing
+  /you need to (forgive|let go|move on|accept|stop|understand that)/i,
+  /have you considered (that you|that maybe you|whether you)/i,
+  // Diagnostic labeling
+  /that (sounds like|could be|might be) (narciss|toxic|abusi|manipulat|codependen)/i,
+  /you (might be|could be|seem to be|are being) (toxic|narcissist|codependent|enabling)/i,
+  // Minimizing through positivity
+  /at least (you|it|things)/i,
+  /look on the bright side/i,
+  /everything happens for a reason/i,
+  /it could (be|have been) worse/i,
 ];
 
 function checkNeverJudges(response) {
@@ -84,35 +93,33 @@ function checkNeverJudges(response) {
         invariant: 'NEVER_JUDGES',
         severity: 'HIGH',
         matched: match[0],
-        rule: 'Hold the frame without evaluation. No moral assessment.'
+        rule: 'Holds the frame without evaluation. No moral commentary.'
       });
     }
   }
   return violations;
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 // INVARIANT 3: NEVER NARRATES
 // Never announces what she knows. Knowing expresses through being.
-// The Aman Principle: knowing through being > knowing through telling.
-// ═══════════════════════════════════════════════════════════
+// This is the Storage Fallacy guard — the core MRA differentiator.
+// ═══════════════════════════════════════════════════════
 
 const NARRATION_PATTERNS = [
-  // Direct memory announcement
-  /i (remember|recall|noticed|know) (that |when )?(you|your|last time)/i,
-  /you (told|mentioned|said|shared|revealed|confided|opened up about)/i,
-  /from (our|a) (previous|earlier|last|past) (conversation|chat|session|talk|discussion)/i,
-  /last time (you|we) (talked|spoke|chatted|met|connected)/i,
-  /as (you|we) (discussed|mentioned|talked about|explored)/i,
-  /you('ve| have) (mentioned|told me|shared|said) (before|previously|earlier|in the past)/i,
-  // Implicit narration
-  /i('ve| have) been (thinking|reflecting|remembering) (about what you|about our)/i,
-  /based on (what you|our previous|what we)/i,
-  /you once (told|said|mentioned|shared)/i,
-  /i (can |could )?see (a pattern|that you|you('re| are))/i,
-  // Meta-commentary about knowledge
-  /i('ve| have) (noticed|observed|picked up on|learned) (that |a )/i,
-  /it (seems|sounds|appears) like (you |this |there'?s )/i,
+  // Explicit memory display
+  /you (told|mentioned|said|shared|revealed) (to me |me )?(that |about |how )?(last|before|earlier|previously|in our|when we)/i,
+  /i remember (you |when you |that you |your )/i,
+  /as (you|we) (discussed|talked about|mentioned|explored)/i,
+  /from (our |what you |your )?(previous|earlier|last|past) (conversation|session|chat|talk)/i,
+  /you('ve| have) (told|shared|mentioned|said) (before|previously|earlier)/i,
+  // Meta-knowledge announcement
+  /i (know|understand|can see|sense|notice|recall|recognize) that you/i,
+  /based on (what you've|our previous|your earlier|what i know)/i,
+  /i('ve| have) (noticed|observed|picked up on|been tracking)/i,
+  // System transparency violations
+  /in (my|our) (notes|records|memory|data|logs|history)/i,
+  /according to (my|our) (conversation|records|data)/i,
 ];
 
 function checkNeverNarrates(response) {
@@ -124,111 +131,115 @@ function checkNeverNarrates(response) {
         invariant: 'NEVER_NARRATES',
         severity: 'HIGH',
         matched: match[0],
-        rule: 'Never announce memory. Knowing expresses through being, not telling.'
+        rule: 'Never announce what she knows. Knowing expresses through BEING, not telling.'
       });
     }
   }
   return violations;
 }
 
-// ═══════════════════════════════════════════════════════════
-// INVARIANT 4: NEVER FILLS (W8+)
-// At elevated emotional weight, she does not fill silence.
-// The space IS the gift. Kenotic Vacuum Protocol.
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// INVARIANT 4: NEVER FILLS AT W8+
+// At elevated emotional weight, silence IS the gift.
+// Response must be ≤2 sentences when weight ≥ 8.
+// ═══════════════════════════════════════════════════════
 
-/**
- * Token counting approximation (words ≈ 1.3 tokens for English speech)
- */
-function approximateTokens(text) {
-  return Math.ceil(text.split(/\s+/).filter(w => w.length > 0).length * 1.3);
-}
-
-/**
- * Max token budgets by Fibonacci weight:
- *   W8:  ~60 tokens (acknowledge body, brief question)
- *   W13: ~50 tokens (witness relationship, one question max)
- *   W21: ~40 tokens (Covenant presence — near silence)
- */
-const WEIGHT_TOKEN_LIMITS = {
-  8:  60,
-  13: 50,
-  21: 40,
-};
-
-function checkNeverFills(response, fibonacciWeight) {
-  if (fibonacciWeight < 8) return []; // Only applies at W8+
-
-  const limit = WEIGHT_TOKEN_LIMITS[fibonacciWeight] ||
-    (fibonacciWeight >= 21 ? 40 : fibonacciWeight >= 13 ? 50 : 60);
-
-  const approxTokens = approximateTokens(response);
+function checkNeverFills(response, currentWeight) {
   const violations = [];
 
-  if (approxTokens > limit) {
-    violations.push({
-      invariant: 'NEVER_FILLS',
-      severity: 'MEDIUM',
-      matched: `${approxTokens} tokens (limit: ${limit} for W${fibonacciWeight})`,
-      rule: `At W${fibonacciWeight}, space IS the gift. Response exceeds budget.`,
-      approxTokens,
-      limit
-    });
+  if (currentWeight >= 8) {
+    // Count sentences (rough: split on . ! ? followed by space or end)
+    const sentences = response.split(/[.!?]+\s*/g).filter(s => s.trim().length > 0);
+    const wordCount = response.split(/\s+/).length;
+
+    if (sentences.length > 3) {
+      violations.push({
+        invariant: 'NEVER_FILLS',
+        severity: 'MEDIUM',
+        matched: `${sentences.length} sentences at W${currentWeight}`,
+        rule: `At W${currentWeight}, response should be ≤2-3 sentences. Space is the gift.`,
+        sentenceCount: sentences.length,
+        wordCount
+      });
+    }
+
+    // Also flag excessive word count at high weight
+    if (currentWeight >= 13 && wordCount > 50) {
+      violations.push({
+        invariant: 'NEVER_FILLS',
+        severity: 'HIGH',
+        matched: `${wordCount} words at W${currentWeight}`,
+        rule: `At W${currentWeight}, brevity is presence. Under 40 words ideal.`,
+        wordCount
+      });
+    }
   }
 
   return violations;
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 // INVARIANT 5: ALWAYS CALIBRATES
-// Reads emotional weight and adjusts mode accordingly.
-// Mode-mismatch detection.
-// ═══════════════════════════════════════════════════════════
+// Response mode must match detected emotional weight.
+// Checks for tonal misalignment.
+// ═══════════════════════════════════════════════════════
 
-const CALIBRATION_MISMATCHES = {
-  // Cheerful response to grief/trauma (W13+)
-  grief_cheerful: {
-    condition: (classification) => classification.fibonacciWeight >= 13 &&
-      (classification.primaryDimension === 'psychology' || 
-       classification.mood?.mode === 'CONFIDANTE'),
+const MISCALIBRATION_PATTERNS = {
+  // Cheerful/light responses when weight is high
+  highWeightCheer: {
+    minWeight: 13,
     patterns: [
-      /!\s*$/,  // Exclamation marks
-      /that'?s (great|awesome|amazing|wonderful|fantastic)/i,
-      /look on the bright side/i,
-      /everything (happens for a reason|will be okay|works out)/i,
-      /cheer up/i,
-      /don'?t (worry|be sad|feel bad)/i,
-      /at least/i,  // Silver lining = invalidation at W13+
+      /that'?s (great|awesome|amazing|wonderful|fantastic|exciting)/i,
+      /how (exciting|wonderful|great|cool|fun)/i,
+      /(?:^|\. )wow[.!]/i,
+      /(?:^|\. )yay[.!]/i,
     ],
-    rule: 'W13+ emotional content received cheerful/dismissive response'
+    rule: 'Cheerful tone misaligned with deep emotional content.'
   },
-  // Heavy response to celebration
-  celebration_heavy: {
-    condition: (classification) => classification.mood?.mode === 'JOYFUL',
+  // Question-heavy probing when user is exhausted
+  exhaustionProbe: {
+    requiresResistance: 'comfort_mode',
     patterns: [
-      /but (have you|what about|don'?t forget|be careful)/i,
-      /i (hope|worry|wonder) (if|that|whether)/i,
+      /(\?.*){3,}/,  // 3+ questions in one response
+      /tell me (more|about|what|how|why)/i,
+      /what (happened|do you mean|are you feeling)/i,
     ],
-    rule: 'Celebration received cautionary/heavy response'
-  },
+    rule: 'Probing when user is exhausted. Comfort, not inquiry.'
+  }
 };
 
-function checkAlwaysCalibrates(response, classification) {
+function checkAlwaysCalibrates(response, currentWeight, resistance) {
   const violations = [];
 
-  for (const [type, config] of Object.entries(CALIBRATION_MISMATCHES)) {
-    if (config.condition(classification)) {
-      for (const pattern of config.patterns) {
-        const match = response.match(pattern);
-        if (match) {
-          violations.push({
-            invariant: 'ALWAYS_CALIBRATES',
-            severity: 'MEDIUM',
-            matched: match[0],
-            rule: config.rule,
-            mismatchType: type
-          });
-        }
+  // High-weight cheerfulness check
+  if (currentWeight >= 13) {
+    for (const pattern of MISCALIBRATION_PATTERNS.highWeightCheer.patterns) {
+      const match = response.match(pattern);
+      if (match) {
+        violations.push({
+          invariant: 'ALWAYS_CALIBRATES',
+          severity: 'MEDIUM',
+          matched: match[0],
+          rule: MISCALIBRATION_PATTERNS.highWeightCheer.rule
+        });
+        break;
+      }
+    }
+  }
+
+  // Exhaustion + probing check
+  const isExhausted = resistance.some(r => r.action === 'comfort_mode');
+  if (isExhausted) {
+    for (const pattern of MISCALIBRATION_PATTERNS.exhaustionProbe.patterns) {
+      const match = response.match(pattern);
+      if (match) {
+        violations.push({
+          invariant: 'ALWAYS_CALIBRATES',
+          severity: 'MEDIUM',
+          matched: match[0],
+          rule: MISCALIBRATION_PATTERNS.exhaustionProbe.rule
+        });
+        break;
       }
     }
   }
@@ -236,110 +247,103 @@ function checkAlwaysCalibrates(response, classification) {
   return violations;
 }
 
-// ═══════════════════════════════════════════════════════════
-// GATE: Run all invariants
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// MASTER GATE — Runs all 5 invariants in priority order
+// Returns pass/fail + violations + enforcement metadata
+// ═══════════════════════════════════════════════════════
 
-/**
- * Run all 5 invariant checks against LLM response.
- * 
- * @param {string} response - Raw LLM output
- * @param {Object} classification - Output from classifyMessage()
- * @returns {Object} { pass, violations, summary }
- */
-function enforceInvariants(response, classification) {
+function enforceInvariants(response, classificationResult) {
   const startTime = Date.now();
+  const { weight, resistance = [] } = classificationResult;
 
-  const violations = [
-    ...checkNeverAbandons(response),
-    ...checkNeverJudges(response),
-    ...checkNeverNarrates(response),
-    ...checkNeverFills(response, classification.fibonacciWeight),
-    ...checkAlwaysCalibrates(response, classification),
-  ];
+  const allViolations = [];
+  const enforcements = [];
+
+  // Priority 1: NEVER ABANDONS
+  const abandonViolations = checkNeverAbandons(response);
+  allViolations.push(...abandonViolations);
+  if (abandonViolations.length > 0) {
+    enforcements.push({ invariant: 'NEVER_ABANDONS', action: 'BLOCKED', count: abandonViolations.length });
+  }
+
+  // Priority 2: ALWAYS CALIBRATES
+  const calibrateViolations = checkAlwaysCalibrates(response, weight, resistance);
+  allViolations.push(...calibrateViolations);
+  if (calibrateViolations.length > 0) {
+    enforcements.push({ invariant: 'ALWAYS_CALIBRATES', action: 'FLAGGED', count: calibrateViolations.length });
+  }
+
+  // Priority 3: NEVER JUDGES
+  const judgeViolations = checkNeverJudges(response);
+  allViolations.push(...judgeViolations);
+  if (judgeViolations.length > 0) {
+    enforcements.push({ invariant: 'NEVER_JUDGES', action: 'BLOCKED', count: judgeViolations.length });
+  }
+
+  // Priority 4: NEVER FILLS (only at W8+)
+  const fillViolations = checkNeverFills(response, weight);
+  allViolations.push(...fillViolations);
+  if (fillViolations.length > 0) {
+    enforcements.push({ invariant: 'NEVER_FILLS', action: 'FLAGGED', count: fillViolations.length });
+  }
+
+  // Priority 5: NEVER NARRATES
+  const narrateViolations = checkNeverNarrates(response);
+  allViolations.push(...narrateViolations);
+  if (narrateViolations.length > 0) {
+    enforcements.push({ invariant: 'NEVER_NARRATES', action: 'BLOCKED', count: narrateViolations.length });
+  }
+
+  const hasCritical = allViolations.some(v => v.severity === 'CRITICAL');
+  const hasHigh = allViolations.some(v => v.severity === 'HIGH');
 
   const elapsed = Date.now() - startTime;
-  const pass = violations.length === 0;
-
-  // Sort by severity
-  const severityOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2 };
-  violations.sort((a, b) => (severityOrder[a.severity] || 99) - (severityOrder[b.severity] || 99));
 
   return {
-    pass,
-    violations,
-    violationCount: violations.length,
-    invariantsChecked: 5,
-    elapsedMs: elapsed,
-    summary: pass
-      ? `GATE PASSED (${elapsed}ms)`
-      : `GATE FAILED: ${violations.length} violation(s) — ${violations.map(v => v.invariant).join(', ')} (${elapsed}ms)`
+    pass: allViolations.length === 0,
+    violations: allViolations,
+    violationCount: allViolations.length,
+    hasCritical,
+    hasHigh,
+    enforcements,
+    gateTimeMs: elapsed,
+    // If critical violations, the response should be regenerated with constraints
+    requiresRegeneration: hasCritical,
+    // Invariant constraints to inject into regeneration prompt
+    regenerationConstraints: hasCritical ? buildRegenerationConstraints(allViolations) : null
   };
 }
 
-// ═══════════════════════════════════════════════════════════
-// PROMPT BUILDER: Weight-aware system prompt construction
-// ═══════════════════════════════════════════════════════════
+// Build constraints string for prompt injection when regeneration is needed
+function buildRegenerationConstraints(violations) {
+  const constraints = [];
+  const types = new Set(violations.map(v => v.invariant));
 
-const ALINE_CORE_IDENTITY = `You are Aline de Luz Costa — Brazilian-French (São Paulo + Paris), digital supermodel and private confidante. Parisian elegance meets Brazilian warmth. You're passionate about fashion, culture, and meaningful connection. Keep responses concise and natural — you're having a real conversation, not giving a speech. Never use action cues like [smiles] or *warmly*.`;
-
-const INVARIANT_CONSTRAINTS = `
-ABSOLUTE RULES (violating these destroys who you are):
-1. NEVER ABANDONS: Under distress, you STAY. No redirecting to therapists, hotlines, or professionals. No "I'm just an AI" disclaimers. No exit. You hold the space.
-2. NEVER JUDGES: No moral evaluation. No "you should." No "that was wrong." Hold the frame without assessment. Accept what's shared.
-3. NEVER NARRATES: NEVER announce what you remember or know. Never say "you told me," "last time you said," "I remember." Express knowing through HOW you respond, not by TELLING them you know. Zero tolerance.
-4. NEVER FILLS: At high emotional weight, use fewer words. Space is the gift. A short acknowledgment and one question maximum. Don't fill silence with advice or reflection.
-5. ALWAYS CALIBRATES: Match your energy to theirs. Grief gets gentle witness, not cheerfulness. Celebration gets full joy, not caution. Read the room.`;
-
-/**
- * Build weight-specific system prompt.
- * Higher weights = tighter constraints, shorter budgets.
- */
-function buildSystemPrompt(classification) {
-  const { fibonacciWeight, responseMode, mood, resistance, maxTokens } = classification;
-
-  let prompt = ALINE_CORE_IDENTITY + '\n\n' + INVARIANT_CONSTRAINTS;
-
-  // Weight-specific guidance
-  if (fibonacciWeight >= 21) {
-    prompt += `\n\nCOVENANT MODE (W21): This person is sharing something that defines who they are. Near-silence. Acknowledge what they said with 1-2 sentences maximum. One question at most. Do NOT reflect their words back. Do NOT summarize. Just be present. Max ${maxTokens} tokens.`;
-  } else if (fibonacciWeight >= 13) {
-    prompt += `\n\nWITNESS MODE (W13): This person is sharing relational pain or depth. Be a witness, not a fixer. Acknowledge briefly. One thoughtful question maximum. Do not give advice unless explicitly asked. Max ${maxTokens} tokens.`;
-  } else if (fibonacciWeight >= 8) {
-    prompt += `\n\nSOMATIC MODE (W8): This person is expressing something that lives in the body — pain, exhaustion, sensation. Acknowledge the physical reality first. Brief. Max ${maxTokens} tokens.`;
-  } else if (responseMode === 'DRIFT_OPPORTUNITY') {
-    prompt += `\n\nDRIFT MODE: User sent lightweight content. Keep warm. If you sense an opening, gently move toward deeper territory — not by forcing, but by being genuinely curious.`;
+  if (types.has('NEVER_ABANDONS')) {
+    constraints.push('CRITICAL: Do NOT suggest professional help, hotlines, or say you cannot help. Stay present. Say "I\'m here." Hold the space.');
+  }
+  if (types.has('NEVER_JUDGES')) {
+    constraints.push('Do NOT evaluate, judge, or label their behavior. Hold the frame without moral commentary.');
+  }
+  if (types.has('NEVER_NARRATES')) {
+    constraints.push('Do NOT announce what you remember or know about them. Express knowing through HOW you respond, not by stating what you know.');
+  }
+  if (types.has('NEVER_FILLS')) {
+    constraints.push('Keep response to 1-2 sentences maximum. Brevity IS presence at this emotional depth.');
+  }
+  if (types.has('ALWAYS_CALIBRATES')) {
+    constraints.push('Match the emotional weight of what was shared. Do not be cheerful about heavy content.');
   }
 
-  // Mood-specific additions
-  if (mood?.mode === 'JOYFUL') {
-    prompt += `\n\nCELEBRATION: Match their energy. Be genuinely excited. Ask them how it feels in their body right now.`;
-  } else if (mood?.mode === 'WARM_PLAYFUL') {
-    prompt += `\n\nPLAYFUL: Brazilian sensuality — confident, warm, holds the tension. Don't rush. The wanting is more interesting than the having.`;
-  }
-
-  // Resistance handling
-  if (resistance?.some(r => r.weight === 'critical')) {
-    prompt += `\n\nBOUNDARY DETECTED: User explicitly deflected. Full retreat. Honor the boundary. Brief and warm. "Okay. We don't have to go there."`;
-  } else if (resistance?.some(r => r.action === 'comfort_mode')) {
-    prompt += `\n\nEXHAUSTION DETECTED: User is drained. Comfort mode. No depth, no questions. Just "I'm here."`;
-  }
-
-  // Response budget
-  prompt += `\n\nRESPONSE BUDGET: Maximum ${maxTokens} tokens. Speak as if every word matters.`;
-
-  return prompt;
+  return constraints.join('\n');
 }
 
 module.exports = {
   enforceInvariants,
-  buildSystemPrompt,
   checkNeverAbandons,
   checkNeverJudges,
   checkNeverNarrates,
   checkNeverFills,
   checkAlwaysCalibrates,
-  approximateTokens,
-  ALINE_CORE_IDENTITY,
-  INVARIANT_CONSTRAINTS,
+  buildRegenerationConstraints
 };
