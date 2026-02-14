@@ -528,8 +528,8 @@ wss.on('connection', async (ws, req) => {
 
   ws.send(JSON.stringify({ type: 'status', message: 'ready' }));
 
-  ws.on('message', (message) => {
-    if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+  ws.on('message', (message, isBinary) => {
+    if (isBinary) {
       audioChunksReceived++;
 
       if (audioChunksReceived === 1) {
