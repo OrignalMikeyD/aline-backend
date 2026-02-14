@@ -550,6 +550,15 @@ wss.on('connection', async (ws, req) => {
       try {
         const data = JSON.parse(message.toString());
 
+        // ── TEXT MESSAGE: feeds directly into MRA pipeline, skips Deepgram ──
+        if (data.type === 'text_message' && data.text && data.text.trim()) {
+          if (!isResponding) {
+            currentTranscript = data.text.trim();
+            processUtterance();
+          }
+        }
+
+        // ── ATELIER DASHBOARD REGISTRATION ──
         if (data.type === 'atelier_dashboard_register') {
           isAtelierDashboard = true;
           registerAtelierClient(ws);
