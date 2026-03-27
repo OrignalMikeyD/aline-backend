@@ -119,7 +119,7 @@ function isNoise(message) {
 function detectPsychology(message) {
   const lower = message.toLowerCase();
   const markers = {
-    identity: { keywords: ["i'm a", 'who i am', 'type of person'], desc: 'identity statement' },
+    identity: { keywords: ["i'm a", 'i am', 'who i am', 'type of person'], desc: 'identity statement' },
     fear: { keywords: ['afraid', 'fear', 'terrified', 'scared', 'anxiety', 'panic', 'worry', 'dread'], desc: 'fear expression' },
     desire: { keywords: ['want', 'need', 'crave', 'wish', 'hope', 'dream', 'long for'], desc: 'desire/longing' },
     trauma: { keywords: ['trauma', 'abuse', 'assault', 'died', 'death',  'grief', 'ptsd', 'haunts'], desc: 'trauma reference' },
@@ -221,7 +221,7 @@ function detectConfessionDepth(message) {
     witness: { keywords: ['everyone', 'people saw', 'they all', 'laughed at', 'in front of'], desc: 'witnessed event' },
     permanence: { keywords: ['still', 'to this day', 'never forgot', 'haunts me', 'changed me', 'ever since'], desc: 'lasting impact' },
     confession: { keywords: ['never told', 'first time', 'admit', 'confess', 'no one knows', 'secret'], desc: 'confession/secret' },
-    selfJudgment: { keywords: ["i'm a", 'i am a', 'such a', 'pathetic', 'worthless'], desc: 'self-judgment' }
+    selfJudgment: { keywords: ["i'm a", 'i am', 'i am a', 'such a', 'pathetic', 'worthless'], desc: 'self-judgment' }
   };
 
   for (const [type, config] of Object.entries(depthMarkers)) {
