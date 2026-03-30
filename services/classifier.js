@@ -122,7 +122,7 @@ function detectPsychology(message) {
     identity: { keywords: ["i'm a", 'i am', 'who i am', 'type of person'], desc: 'identity statement' },
     fear: { keywords: ['afraid', 'fear', 'terrified', 'scared', 'anxiety', 'panic', 'worry', 'dread'], desc: 'fear expression' },
     desire: { keywords: ['want', 'need', 'crave', 'wish', 'hope', 'dream', 'long for'], desc: 'desire/longing' },
-    trauma: { keywords: ['trauma', 'abuse', 'assault', 'died', 'death',  'grief', 'ptsd', 'haunts'], desc: 'trauma reference' },
+    trauma: { keywords: ['trauma', 'abuse', 'assault', 'grief', 'ptsd', 'haunts'], desc: 'trauma reference' },
     shame: { keywords: ['ashamed', 'embarrassed', 'humiliated', 'worthless', 'stupid', 'failure', 'hate myself'], desc: 'shame/self-judgment' },
     existential: { keywords: ['meaningless', 'pointless', "what's the point", 'nothing matters', 'purpose'], desc: 'existential concern' },
     belief: { keywords: ['i believe', 'i think', 'i feel like', 'i always', 'i never'], desc: 'core belief' }

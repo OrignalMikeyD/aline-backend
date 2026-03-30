@@ -284,7 +284,9 @@ function enforceInvariants(response, classificationResult) {
   const fillViolations = checkNeverFills(response, weight);
   allViolations.push(...fillViolations);
   if (fillViolations.length > 0) {
-    enforcements.push({ invariant: 'NEVER_FILLS', action: 'FLAGGED', count: fillViolations.length });
+    enforcements.push({ invariant: 'NEVER_FILLS', action: 'BLOCKED', count: fillViolations.length });
+    // Escalate NEVER_FILLS to critical so regeneration fires
+    fillViolations.forEach(v => v.severity = 'CRITICAL');
   }
 
   // Priority 5: NEVER NARRATES
