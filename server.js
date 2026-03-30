@@ -440,6 +440,9 @@ wss.on('connection', async (ws, req) => {
       // │ Stream audio to client via Simli pipeline     │
       // └──────────────────────────────────────────────┘
 
+      const { crisisOverride } = require("./services/crisis-override");
+      const crisisResult = await crisisOverride({ classification, response: fullResponse, sessionId });
+      if (crisisResult.override) { fullResponse = crisisResult.modifiedResponse; }
       const cleanText = cleanTextForTTS(fullResponse);
       if (cleanText.length > 0) {
         ws.send(JSON.stringify({ type: 'status', message: 'speaking' }));
