@@ -20,7 +20,7 @@ const DEFAULT_PROFILE = {
   last_session_end_weight: null,
   last_session_end_mode: null,
   last_session_crisis: false,
-  avg_deltaV: 0,
+  avg_deltav: 0,
 };
 
 async function loadProfile(supabase, userId) {
@@ -74,7 +74,7 @@ async function updateProfile(supabase, userId, sessionSummary) {
     const existingProfile = await loadProfile(supabase, userId);
     const newSessionCount = (existingProfile.session_count || 0) + 1;
     const newTotalTurns = (existingProfile.total_turns || 0) + turnCount;
-    const prevAvgDeltaV = existingProfile.avg_deltaV || 0;
+    const prevAvgDeltaV = existingProfile.avg_deltav || 0;
     const prevSessionCount = existingProfile.session_count || 0;
     const newAvgDeltaV = prevSessionCount > 0
       ? ((prevAvgDeltaV * prevSessionCount) + deltaV) / newSessionCount
@@ -107,7 +107,7 @@ async function updateProfile(supabase, userId, sessionSummary) {
       last_session_end_weight: finalWeight,
       last_session_end_mode: finalMode,
       last_session_crisis: crisisActivated,
-      avg_deltaV: parseFloat(newAvgDeltaV.toFixed(4)),
+      avg_deltav: parseFloat(newAvgDeltaV.toFixed(4)),
       updated_at: new Date().toISOString(),
     };
     const { data, error } = await supabase
