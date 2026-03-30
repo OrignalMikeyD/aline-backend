@@ -480,6 +480,7 @@ wss.on('connection', async (ws, req) => {
             }
           );
           await streamAudioToClient(ws, suffixStream);
+          ws.send(JSON.stringify({ type: 'response_text', text: crisisResult.crisisSuffix }));
           console.log('[Crisis] Suffix audio sent separately');
         }
       }
