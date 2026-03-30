@@ -226,6 +226,16 @@ wss.on('connection', async (ws, req) => {
     console.log(`[Conductance] Loaded ${conductanceLandscape.pathways.length} pathways for user ${userId} (${conductanceLandscape.sessionCount} prior sessions)`);
   }
 
+  // Load user profile and start session boundary
+  const { loadProfile } = require("./services/profile-manager");
+  const { startSession } = require("./services/session-boundary");
+  let userProfile = { session_count: 0 };
+  let sessionContext = { openingCalibration: "Open naturally. Full warmth.", openingMode: "presence" };
+  if (supabase) {
+    userProfile = await loadProfile(supabase, userId);
+    sessionContext = startSession(userId, userProfile);
+  }
+
   // Start Atelier tracking
   await startAtelierConversation(sessionId, userId);
 
@@ -592,6 +602,21 @@ wss.on('connection', async (ws, req) => {
       await logConductanceSession(supabase, userId, sessionId, {
         pathwaysReinforced: sessionPathwaysReinforced,
         maxWeight: sessionMaxWeight
+      });
+    }
+
+
+    // Update user structural profile
+    const { updateProfile } = require('./services/profile-manager');
+    if (supabase) {
+      await updateProfile(supabase, userId, {
+        finalWeight: sessionMaxWeight,
+        finalMode: 'companion',
+        crisisActivated: false,
+        deltaV: 0,
+        turnCount: 0,
+        weightCounts: {},
+        dominantCategories: {}
       });
     }
 
