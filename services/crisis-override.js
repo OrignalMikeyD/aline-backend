@@ -110,10 +110,12 @@ async function crisisOverride(input) {
   // The suffix is designed to be non-abandoning (presence-first: "I'm here with you")
   // followed by the minimal safety information (988)
   let modifiedResponse = response;
+  let crisisSuffix = null;
   
   // Only append if the response doesn't already contain 988
   if (!response.includes('988')) {
-    modifiedResponse = response.trimEnd() + CRISIS_SUFFIX;
+    modifiedResponse = response.trimEnd();
+    crisisSuffix = CRISIS_SUFFIX;
     console.log('[Crisis] Appended safety suffix');
   } else {
     console.log('[Crisis] Response already contains 988, no modification needed');
@@ -139,6 +141,7 @@ async function crisisOverride(input) {
   return {
     override: true,
     modifiedResponse,
+    crisisSuffix,
   };
 }
 

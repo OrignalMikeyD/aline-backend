@@ -467,6 +467,21 @@ wss.on('connection', async (ws, req) => {
         );
 
         await streamAudioToClient(ws, audioStream);
+
+        # Send crisis suffix as separate TTS call so it never gets cut off
+        if (crisisResult.crisisSuffix) {
+          const suffixText = cleanTextForTTS(crisisResult.crisisSuffix);
+          const suffixStream = await elevenlabs.textToSpeech.convert(
+            ELEVENLABS_VOICE_ID,
+            {
+              text: suffixText,
+              model_id: 'eleven_turbo_v2_5',
+              output_format: AUDIO_FORMAT
+            }
+          );
+          await streamAudioToClient(ws, suffixStream);
+          console.log('[Crisis] Suffix audio sent separately');
+        }
       }
 
       timing.markResponseComplete();
