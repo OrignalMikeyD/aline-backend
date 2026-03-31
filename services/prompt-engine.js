@@ -146,7 +146,7 @@ function buildConductanceContext(conductanceData) {
 // Called every turn with fresh classification data
 // ═══════════════════════════════════════════════════════
 
-function buildSystemPrompt(classificationResult, conductanceData = null, regenerationConstraints = null) {
+function buildSystemPrompt(classificationResult, conductanceData = null, regenerationConstraints = null, sessionContext = null) {
   const { weight, mood, resistance = [], hasCriticalResistance } = classificationResult;
 
   // Get the weight-appropriate calibration
@@ -176,6 +176,11 @@ function buildSystemPrompt(classificationResult, conductanceData = null, regener
     ? `\nCRITICAL CONSTRAINTS (previous response violated identity rules):\n${regenerationConstraints}`
     : '';
 
+  // Session context - opening calibration from prior session
+  const sessionBlock = sessionContext?.openingCalibration
+    ? `\nSESSION CONTEXT: ${sessionContext.openingCalibration}`
+    : '';
+
   // Assemble
   const prompt = [
     IDENTITY_CORE,
@@ -186,6 +191,7 @@ function buildSystemPrompt(classificationResult, conductanceData = null, regener
     resistanceBlock,
     conductanceBlock,
     regenBlock,
+    sessionBlock,
     `\nREMEMBER: You are SPEAKING, not writing. Short phrases. Natural rhythm. No action cues like [smiles] or *warmly*. No bullet points. No lists. Just your voice.`
   ].filter(Boolean).join('\n');
 

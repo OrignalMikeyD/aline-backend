@@ -360,7 +360,7 @@ wss.on('connection', async (ws, req) => {
     // │ conductance landscape                         │
     // └──────────────────────────────────────────────┘
 
-    const systemPrompt = buildSystemPrompt(classification, conductanceLandscape);
+    const systemPrompt = buildSystemPrompt(classification, conductanceLandscape, null, sessionContext);
 
     // ┌──────────────────────────────────────────────┐
     // │ STEP 4: GENERATE (Claude LLM)                │
@@ -393,7 +393,7 @@ wss.on('connection', async (ws, req) => {
         const messages = [...conversationHistory];
         const currentSystemPrompt = attempt === 0
           ? systemPrompt
-          : buildSystemPrompt(classification, conductanceLandscape, gateResult?.regenerationConstraints);
+          : buildSystemPrompt(classification, conductanceLandscape, gateResult?.regenerationConstraints, sessionContext);
 
         const stream = anthropic.messages.stream({
           model: MODEL_NAME,
