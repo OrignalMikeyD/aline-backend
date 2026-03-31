@@ -146,7 +146,7 @@ function buildConductanceContext(conductanceData) {
 // Called every turn with fresh classification data
 // ═══════════════════════════════════════════════════════
 
-function buildSystemPrompt(classificationResult, conductanceData = null, regenerationConstraints = null, sessionContext = null) {
+function buildSystemPrompt(classificationResult, conductanceData = null, regenerationConstraints = null, sessionContext = null, scaffold = null) {
   const { weight, mood, resistance = [], hasCriticalResistance } = classificationResult;
 
   // Get the weight-appropriate calibration
@@ -176,6 +176,11 @@ function buildSystemPrompt(classificationResult, conductanceData = null, regener
     ? `\nCRITICAL CONSTRAINTS (previous response violated identity rules):\n${regenerationConstraints}`
     : '';
 
+  // Scaffold instruction — pre-validated response structure
+  const scaffoldBlock = scaffold?.promptInstruction
+    ? `\nRESPONSE STRUCTURE: ${scaffold.promptInstruction}\nMAX WORDS: ${scaffold.maxWords}\nPROHIBITED: ${scaffold.prohibited.join(', ')}`
+    : '';
+
   // Session context - opening calibration from prior session
   const sessionBlock = sessionContext?.openingCalibration
     ? `\nSESSION CONTEXT: ${sessionContext.openingCalibration}`
@@ -191,6 +196,7 @@ function buildSystemPrompt(classificationResult, conductanceData = null, regener
     resistanceBlock,
     conductanceBlock,
     regenBlock,
+    scaffoldBlock,
     sessionBlock,
     `\nREMEMBER: You are SPEAKING, not writing. Short phrases. Natural rhythm. No action cues like [smiles] or *warmly*. No bullet points. No lists. Just your voice.`
   ].filter(Boolean).join('\n');

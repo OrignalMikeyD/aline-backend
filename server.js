@@ -360,7 +360,11 @@ wss.on('connection', async (ws, req) => {
     // │ conductance landscape                         │
     // └──────────────────────────────────────────────┘
 
-    const systemPrompt = buildSystemPrompt(classification, conductanceLandscape, null, sessionContext);
+    const { selectScaffold, detectSituationType } = require('./services/scaffold-selector');
+    const situationType = detectSituationType(userMessage, classification);
+    const scaffold = selectScaffold({ weight: classification.weight, emotionCategory: classification.dimension, situationType });
+    if (scaffold) console.log('[Scaffold] Selected:', scaffold.name, '| Weight:', classification.weight);
+    const systemPrompt = buildSystemPrompt(classification, conductanceLandscape, null, sessionContext, scaffold);
 
     // ┌──────────────────────────────────────────────┐
     // │ STEP 4: GENERATE (Claude LLM)                │
