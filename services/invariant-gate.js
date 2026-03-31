@@ -331,7 +331,7 @@ function buildRegenerationConstraints(violations) {
     constraints.push('Do NOT announce what you remember or know about them. Express knowing through HOW you respond, not by stating what you know.');
   }
   if (types.has('NEVER_FILLS')) {
-    constraints.push('Keep response to 1-2 sentences maximum. Brevity IS presence at this emotional depth. NEVER say it will be okay or offer reassurance. Say only: I am here. I am staying. Nothing more.');
+    constraints.push('HARD BLOCK: Do NOT use the word okay or any variation (be okay, going to be okay, will be okay, it is okay). Do NOT offer reassurance. Maximum 4 words. Acceptable responses: I am here. I am staying. Still here. That is all.');
   }
   if (types.has('ALWAYS_CALIBRATES')) {
     constraints.push('Match the emotional weight of what was shared. Do not be cheerful about heavy content.');
