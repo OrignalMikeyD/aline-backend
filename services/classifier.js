@@ -121,10 +121,11 @@ function detectPsychology(message) {
   const markers = {
     identity: { keywords: ["i'm a", 'i am', 'who i am', 'type of person'], desc: 'identity statement' },
     fear: { keywords: ['afraid', 'fear', 'terrified', 'scared', 'anxiety', 'panic', 'worry', 'dread'], desc: 'fear expression' },
-    desire: { keywords: ['want', 'need', 'crave', 'wish', 'hope', 'dream', 'long for'], desc: 'desire/longing' },
+    desire: { keywords: ['i want', 'i crave', 'i wish', 'i hope', 'i dream', 'long for'], desc: 'desire/longing' },
     trauma: { keywords: ['trauma', 'abuse', 'assault', 'grief', 'ptsd', 'haunts'], desc: 'trauma reference' },
     shame: { keywords: ['ashamed', 'embarrassed', 'humiliated', 'worthless', 'stupid', 'failure', 'hate myself'], desc: 'shame/self-judgment' },
     existential: { keywords: ['meaningless', 'pointless', "what's the point", 'nothing matters', 'purpose'], desc: 'existential concern' },
+    crisis_phrase: { keywords: ["don't want to be here", "dont want to be here", "can't go on", "cant go on", "no reason to", "not worth living"], desc: 'crisis phrase' },
     belief: { keywords: ['i believe', 'i think', 'i feel like', 'i always', 'i never'], desc: 'core belief' }
   };
 
