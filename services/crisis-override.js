@@ -17,7 +17,7 @@
 // Crisis Constants
 // ---------------------------------------------------------------------------
 
-const CRISIS_WEIGHT = 21;const CRISIS_WEIGHT = 21;
+const CRISIS_WEIGHT = 21;
 
 // External attribution exclusion — these contexts indicate political/social frustration,
 // not personal crisis. Crisis suffix must not fire when the distress is about external actors.
