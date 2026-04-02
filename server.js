@@ -540,7 +540,8 @@ wss.on('connection', async (ws, req) => {
       // Finalize turn
       conversationHistory.push({ role: 'assistant', content: fullResponse });
       ws.send(JSON.stringify({ type: 'audio_complete' }));
-      ws.send(JSON.stringify({ type: 'response_final', text: cleanText }));
+      const crisisSuffixClean = crisisResult?.crisisSuffix ? cleanTextForTTS(crisisResult.crisisSuffix) : '';
+      ws.send(JSON.stringify({ type: 'response_final', text: cleanText + (crisisSuffixClean ? ' ' + crisisSuffixClean : '') }));
       ws.send(JSON.stringify({ type: 'response_complete' }));
 
       console.log(`[Response] "${fullResponse.substring(0, 80)}..." (W${classification.weight})`);
