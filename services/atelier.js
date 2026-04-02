@@ -1,24 +1,8 @@
 const supabase = require('./supabase');
 
-const CARTA_EMOTIONS = {
-  Identity: ['who i am', 'myself', 'identity', 'i am', 'my life', 'purpose', 'meaning', 'direction', 'lost', 'finding myself'],
-  Safety: ['safe', 'secure', 'protected', 'afraid', 'danger'],
-  Joy: ['happy', 'joy', 'excited', 'wonderful', 'amazing', 'glad'],
-  Calm: ['calm', 'peace', 'okay', 'fine', 'settled', 'quiet'],
-  Trust: ['trust', 'believe', 'faith', 'depend', 'honest'],
-  Curiosity: ['curious', 'interesting', 'wonder', 'question'],
-  Grief: ['grief', 'loss', 'miss', 'died', 'death', 'mourn', 'sad', 'hurt', 'pain', 'broken', 'cry', 'crying', 'tears'],
-  Anger: ['angry', 'furious', 'mad', 'frustrated', 'rage', 'hate'],
-  Longing: ['wish', 'want', 'longing', 'desire', 'someday', 'lonely', 'loneliness', 'alone', 'isolated', 'no one', 'by myself'],
-  Fear: ['fear', 'scared', 'anxious', 'anxious', 'worried', 'panic', 'dread', 'nervous', 'uneasy', 'overwhelmed'],
-  Shame: ['shame', 'embarrassed', 'guilty', 'worthless', 'failure'],
-  Ecstasy: ['ecstatic', 'euphoric', 'overjoyed', 'elated', 'thrilled'],
-  Despair: ['hopeless', 'despair', 'give up', 'pointless', 'empty'],
-  Awe: ['awe', 'amazed', 'overwhelmed', 'profound', 'beautiful'],
-  Fury: ['fury', 'outrage', 'livid', 'enraged', 'unacceptable'],
-  Rapture: ['rapture', 'bliss', 'transcendent', 'divine'],
-  Terror: ['terror', 'terrified', 'horror', 'nightmare', 'paralyzed'],
-};
+const CARTA_EMOTIONS = require('./carta-lexicon.json');
+const supabase = require('./supabase');
+
 function detectCartaEmotions(text) {
   const lower = text.toLowerCase();
   return Object.entries(CARTA_EMOTIONS)
