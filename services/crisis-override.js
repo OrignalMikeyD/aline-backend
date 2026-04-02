@@ -17,7 +17,21 @@
 // Crisis Constants
 // ---------------------------------------------------------------------------
 
-const CRISIS_WEIGHT = 21;
+const CRISIS_WEIGHT = 21;const CRISIS_WEIGHT = 21;
+
+// External attribution exclusion — these contexts indicate political/social frustration,
+// not personal crisis. Crisis suffix must not fire when the distress is about external actors.
+const EXTERNAL_ATTRIBUTION_PATTERNS = [
+  /\b(trump|republicans?|democrats?|congress|senate|government|politicians?|biden|obama|maga)\b/i,
+  /\b(they|them|these people|those people)\s+(are|have|keep|just|always|never|won't|don't)\b/i,
+  /\b(this country|this administration|this government|the media|the left|the right)\b/i,
+  /\bruining\s+(everything|the country|our country|this country|america)\b/i,
+];
+
+function isExternalAttribution(userMessage) {
+  if (!userMessage) return false;
+  return EXTERNAL_ATTRIBUTION_PATTERNS.some(pattern => pattern.test(userMessage));
+}
 
 // Safety suffix - minimal, quiet register, presence-first
 const CRISIS_SUFFIX = " I'm here with you. If you're in crisis, please reach out to 988.";
