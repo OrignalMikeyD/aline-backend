@@ -32,6 +32,9 @@ async function startAtelierConversation(sessionId, userId) {
     maxFecWeight: 0,
     strongTurnCount: 0,
     dominantEmotions: {},
+    maxFecWeight: 0,
+    strongTurnCount: 0,
+    dominantEmotions: {},
   };
 
   activeConversations.set(sessionId, conversation);
@@ -97,6 +100,8 @@ async function logTurn(sessionId, speaker, text, sentiment, fecWeight = 0, emoti
     sentiment_value: sentiment,
     turn_number: conversation.turnCount,
     speaker: speaker,
+    fec_weight: fecWeight,
+    emotion_label: emotionLabel,
     fec_weight: fecWeight,
     emotion_label: emotionLabel,
   });

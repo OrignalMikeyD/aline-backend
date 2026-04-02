@@ -54,6 +54,7 @@ const {
   startAtelierConversation,
   logTurn,
   endAtelierConversation,
+  getActiveConversation,
   detectArtifact,
   ARTIFACT_TYPES,
 } = require('./services/atelier');
@@ -373,7 +374,7 @@ wss.on('connection', async (ws, req) => {
 
     // Atelier: log user turn
     const userSentiment = quickSentiment(userMessage);
-    await logTurn(sessionId, 'USER', userMessage, userSentiment, classification.weight, classification.dimension);
+    await logTurn(sessionId, 'USER', userMessage, userSentiment, classification.weight, null);
 
     // Log classification as artifact
     if (classification.weight >= 8) {
@@ -640,8 +641,9 @@ wss.on('connection', async (ws, req) => {
       });
     }
 
-    // End Atelier conversation
-    if (!isAtelierDashboard) {
+    // End Atelier conversation - skip empty sessions
+    const activeConv = getActiveConversation(sessionId);
+    if (!isAtelierDashboard && activeConv && activeConv.turnCount > 0) {
       const results = await endAtelierConversation(sessionId);
       if (results) {
         console.log(`[Atelier] Session results: ΔV=${results.deltaV?.toFixed(2)}, Artifacts=${results.artifacts?.length}`);
