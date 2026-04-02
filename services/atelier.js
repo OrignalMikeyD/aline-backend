@@ -1,7 +1,6 @@
 const supabase = require('./supabase');
 
 const CARTA_EMOTIONS = require('./carta-lexicon.json');
-const supabase = require('./supabase');
 
 function detectCartaEmotions(text) {
   const lower = text.toLowerCase();
