@@ -455,7 +455,7 @@ wss.on('connection', async (ws, req) => {
       // └──────────────────────────────────────────────┘
 
       const { crisisOverride } = require("./services/crisis-override");
-      const crisisResult = await crisisOverride({ classification, response: fullResponse, sessionId, userMessage: transcribedText });
+      const crisisResult = await crisisOverride({ classification, response: fullResponse, sessionId, userMessage: currentTranscript });
       if (crisisResult.override) { fullResponse = crisisResult.modifiedResponse; }
       const cleanText = cleanTextForTTS(fullResponse);
       if (cleanText.length > 0) {
