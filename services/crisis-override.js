@@ -126,6 +126,21 @@ async function crisisOverride(input) {
               };
       }
   
+  // Require explicit crisis language - W21 alone is not enough
+  const categories = classification?.dimensions?.[0]?.categories || [];
+  const hasCrisisPhrase = categories.includes('crisis_phrase');
+  const userText = input.userMessage || input.transcribedText || input.text || '';
+  const CRISIS_KEYWORDS = ["don't want to be here", "dont want to be here", "can't go on", "cant go on", "no reason to live", "not worth living", "end it", "kill myself", "suicide", "want to die"];
+  const hasCrisisKeyword = CRISIS_KEYWORDS.some(kw => userText.toLowerCase().includes(kw));
+
+  if (!hasCrisisPhrase && !hasCrisisKeyword) {
+    console.log('[Crisis] W21 but no crisis phrase detected - skipping suffix');
+    return {
+      override: false,
+      modifiedResponse: response,
+    };
+  }
+
   // W21 CRISIS ACTIVATE
   console.log('[Crisis] W21 CRISIS ACTIVATED');
   
