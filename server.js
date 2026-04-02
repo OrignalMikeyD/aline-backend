@@ -373,7 +373,7 @@ wss.on('connection', async (ws, req) => {
 
     // Atelier: log user turn
     const userSentiment = quickSentiment(userMessage);
-    await logTurn(sessionId, 'USER', userMessage, userSentiment);
+    await logTurn(sessionId, 'USER', userMessage, userSentiment, classification.weight, classification.dimension);
 
     // Log classification as artifact
     if (classification.weight >= 8) {

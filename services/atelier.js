@@ -29,6 +29,9 @@ async function startAtelierConversation(sessionId, userId) {
     sentimentStart: null,
     sentimentEnd: null,
     artifacts: [],
+    maxFecWeight: 0,
+    strongTurnCount: 0,
+    dominantEmotions: {},
   };
 
   activeConversations.set(sessionId, conversation);
@@ -68,11 +71,18 @@ async function startAtelierConversation(sessionId, userId) {
 }
 
 // Log each conversation turn with sentiment
-async function logTurn(sessionId, speaker, text, sentiment) {
+async function logTurn(sessionId, speaker, text, sentiment, fecWeight = 0, emotionLabel = null) {
   const conversation = activeConversations.get(sessionId);
   if (!conversation || !supabase) return;
 
   conversation.turnCount++;
+
+  // Track FEC weight
+  if (fecWeight > conversation.maxFecWeight) conversation.maxFecWeight = fecWeight;
+  if (fecWeight >= 8) conversation.strongTurnCount++;
+  if (emotionLabel) {
+    conversation.dominantEmotions[emotionLabel] = (conversation.dominantEmotions[emotionLabel] || 0) + 1;
+  }
 
   // Track sentiment for start/end comparison
   if (conversation.turnCount === 1 && speaker === 'USER') {
@@ -87,6 +97,8 @@ async function logTurn(sessionId, speaker, text, sentiment) {
     sentiment_value: sentiment,
     turn_number: conversation.turnCount,
     speaker: speaker,
+    fec_weight: fecWeight,
+    emotion_label: emotionLabel,
   });
 
   if (error) {
@@ -238,7 +250,11 @@ async function endAtelierConversation(sessionId) {
     });
   }
 
-  // Update conversation record
+  // Find dominant emotion
+  const dominantEmotion = Object.entries(conversation.dominantEmotions)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+  // Update conversation record with Carta data
   await supabase
     .from('atelier_conversations')
     .update({
@@ -246,8 +262,37 @@ async function endAtelierConversation(sessionId) {
       turn_count: conversation.turnCount,
       sentiment_start: conversation.sentimentStart,
       sentiment_end: conversation.sentimentEnd,
+      max_fec_weight: conversation.maxFecWeight,
+      strong_turn_count: conversation.strongTurnCount,
+      total_turn_count: conversation.turnCount,
+      dominant_emotion: dominantEmotion,
+      delta_v: parseFloat(deltaV.toFixed(2)),
     })
     .eq('id', conversation.dbId);
+
+  // Upsert carta_node_maturity for each emotion fired this session
+  for (const [emotion, count] of Object.entries(conversation.dominantEmotions)) {
+    const maturityIncrement = count * 0.3 + (conversation.maxFecWeight >= 8 ? 1.0 : 0.3);
+    await supabase
+      .from('carta_node_maturity')
+      .upsert({
+        user_id: conversation.userId,
+        emotion_label: emotion,
+        maturity_score: maturityIncrement,
+        session_count: 1,
+        last_activated_at: endedAt,
+      }, {
+        onConflict: 'user_id,emotion_label',
+        ignoreDuplicates: false,
+      });
+
+    // Increment maturity score for existing rows
+    await supabase.rpc('increment_carta_maturity', {
+      p_user_id: conversation.userId,
+      p_emotion: emotion,
+      p_increment: maturityIncrement,
+    }).catch(() => null); // RPC may not exist yet, fallback ok
+  }
 
   const results = {
     deltaV,
