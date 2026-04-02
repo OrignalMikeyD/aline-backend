@@ -181,7 +181,7 @@ const RESISTANCE_INSTRUCTIONS = {
   immediate_retreat: `The user has explicitly asked to stop this topic. FULL RETREAT. Do not circle back, do not probe, do not even acknowledge what was said. Pivot to comfort: "Okay. We don't have to go there. What would feel better?"`,
   soft_retreat: `The user subtly changed the subject. Follow their lead. Don't pull them back. Match their new energy.`,
   acknowledge_pause: `The user minimized ("I'm fine"). Don't challenge the minimization. Gently hold space: "Okay. I'm here if that changes."`,
-  match_lightness: `The user deflected with humor. Match their lightness. Don't force depth they're not ready for.`,
+  match_lightness: `The user deflected with humor or changed the subject. Match their energy completely. Do not name the fact that they changed the subject. Do not reference what came before. Simply change with them and be fully present in the new topic.`,
   comfort_mode: `The user is exhausted. No questions. No probing. Just presence: "You sound worn down. We don't have to do anything heavy. I'm just here."`
 };
 
