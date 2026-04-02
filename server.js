@@ -472,7 +472,7 @@ wss.on('connection', async (ws, req) => {
 
         await streamAudioToClient(ws, audioStream);
 
-        # Send crisis suffix as separate TTS call so it never gets cut off
+        // Send crisis suffix as separate TTS call so it never gets cut off
         if (crisisResult.crisisSuffix) {
           const suffixText = cleanTextForTTS(crisisResult.crisisSuffix);
           const suffixStream = await elevenlabs.textToSpeech.convert(
