@@ -116,8 +116,17 @@ async function crisisOverride(input) {
       modifiedResponse: response,
     };
   }
+      // External attribution exclusion — skip 988 for political/social frustration
+      const userText = input.userMessage || input.transcribedText || input.text || '';
+      if (isExternalAttribution(userText)) {
+              console.log('[Crisis] External attribution detected, skipping crisis suffix');
+              return {
+                        override: false,
+                        modifiedResponse: response,
+              };
+      }
   
-  // W21 CRISIS ACTIVATED
+  // W21 CRISIS ACTIVATE
   console.log('[Crisis] W21 CRISIS ACTIVATED');
   
   // Append safety suffix to response
