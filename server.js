@@ -186,6 +186,8 @@ wss.on('connection', (ws, req) => {
 
   // ── AI RESPONSE ──
   async function generateResponse(userText) {
+    console.log(`[${personaId}] Processing message: "${userText}"`)
+    
     conversationHistory.push({ role: 'user', content: userText })
 
     let fullResponse = ''
@@ -225,8 +227,10 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'response_complete' }))
       ws.send(JSON.stringify({ type: 'status', message: 'listening' }))
 
+      console.log(`[${personaId}] Response completed: "${fullResponse}"`)
+
     } catch (err) {
-      console.error('Anthropic error:', err)
+      console.error(`[${personaId}] Anthropic error:`, err)
       ws.send(JSON.stringify({ type: 'error', message: 'Response generation failed' }))
     }
   }
@@ -275,38 +279,86 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  // ── MESSAGE HANDLER (FIXED FOR TEXT CHAT) ──
+  // ── MESSAGE HANDLER (ENHANCED FOR BUFFER AND STRING HANDLING) ──
   ws.on('message', (data) => {
-    if (typeof data === 'string') {
-      const msg = JSON.parse(data)
-      
-      // Handle ping/pong
-      if (msg.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong' }))
-        return
-      }
-      
-      // Handle text messages from web interface
-      if (msg.type === 'message' && msg.content && msg.content.trim()) {
-        if (!processingResponse) {
-          currentTranscript = msg.content.trim()
-          processingResponse = true
+    // Convert buffer to string if needed for JSON messages
+    let messageData = data
+    if (Buffer.isBuffer(data)) {
+      try {
+        // Try to convert buffer to string for JSON parsing
+        messageData = data.toString('utf8')
+        // If it looks like JSON, parse it
+        if (messageData.startsWith('{')) {
+          const msg = JSON.parse(messageData)
           
-          ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
-          generateResponse(currentTranscript)
-            .then(() => {
-              processingResponse = false
-            })
-            .catch(err => {
-              console.error('Response error:', err)
-              processingResponse = false
-            })
+          // Handle ping/pong
+          if (msg.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }))
+            return
+          }
+          
+          // Handle text messages from web interface
+          if (msg.type === 'message' && msg.content && msg.content.trim()) {
+            console.log(`[${personaId}] Received text message: "${msg.content}"`)
+            if (!processingResponse) {
+              currentTranscript = msg.content.trim()
+              processingResponse = true
+              
+              ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
+              generateResponse(currentTranscript)
+                .then(() => {
+                  processingResponse = false
+                })
+                .catch(err => {
+                  console.error(`[${personaId}] Response error:`, err)
+                  processingResponse = false
+                })
+            }
+            return
+          }
         }
-        return
+      } catch (parseError) {
+        // If JSON parsing fails, treat as binary audio data
+        // Fall through to audio handling below
+      }
+    }
+    
+    // Handle string JSON messages
+    if (typeof data === 'string') {
+      try {
+        const msg = JSON.parse(data)
+        
+        // Handle ping/pong
+        if (msg.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong' }))
+          return
+        }
+        
+        // Handle text messages from web interface
+        if (msg.type === 'message' && msg.content && msg.content.trim()) {
+          console.log(`[${personaId}] Received text message: "${msg.content}"`)
+          if (!processingResponse) {
+            currentTranscript = msg.content.trim()
+            processingResponse = true
+            
+            ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
+            generateResponse(currentTranscript)
+              .then(() => {
+                processingResponse = false
+              })
+              .catch(err => {
+                console.error(`[${personaId}] Response error:`, err)
+                processingResponse = false
+              })
+          }
+          return
+        }
+      } catch (parseError) {
+        console.error(`[${personaId}] JSON parse error:`, parseError)
       }
     }
 
-    // Binary audio -- forward to Deepgram
+    // Binary audio data - forward to Deepgram
     if (!deepgramConnection) {
       deepgramConnection = initDeepgram()
     }
@@ -317,12 +369,12 @@ wss.on('connection', (ws, req) => {
   })
 
   ws.on('close', () => {
-    console.log(`Connection closed — persona: ${personaId}`)
+    console.log(`[${personaId}] Connection closed`)
     deepgramConnection?.finish()
   })
 
   ws.on('error', (err) => {
-    console.error('WebSocket error:', err)
+    console.error(`[${personaId}] WebSocket error:`, err)
   })
 })
 
