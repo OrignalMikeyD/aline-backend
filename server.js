@@ -275,14 +275,35 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  // ── AUDIO FROM CLIENT ──
+  // ── MESSAGE HANDLER (FIXED FOR TEXT CHAT) ──
   ws.on('message', (data) => {
     if (typeof data === 'string') {
       const msg = JSON.parse(data)
+      
+      // Handle ping/pong
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }))
+        return
       }
-      return
+      
+      // Handle text messages from web interface
+      if (msg.type === 'message' && msg.content && msg.content.trim()) {
+        if (!processingResponse) {
+          currentTranscript = msg.content.trim()
+          processingResponse = true
+          
+          ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
+          generateResponse(currentTranscript)
+            .then(() => {
+              processingResponse = false
+            })
+            .catch(err => {
+              console.error('Response error:', err)
+              processingResponse = false
+            })
+        }
+        return
+      }
     }
 
     // Binary audio -- forward to Deepgram
