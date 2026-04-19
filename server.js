@@ -137,11 +137,10 @@ const server = http.createServer(async (req, res) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Simli-API-Key': process.env.SIMLI_API_KEY,
         },
         body: JSON.stringify({
-          face_id: avatarId,
-          sync_audio: true,
+          faceId: avatarId,
+          apiKey: process.env.SIMLI_API_KEY,
         }),
       })
 
