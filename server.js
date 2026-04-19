@@ -3,6 +3,17 @@ const http = require('http')
 const { createClient } = require('@deepgram/sdk')
 const Anthropic = require('@anthropic-ai/sdk')
 
+// ── CONFIGURATION ─────────────────────────────────────────────────
+const VOICE_IDS = {
+  aline: 'knPeAXsHZ6FVdoLHMtRJ',
+  chase: 'n6PxDvHhqw89qVi3Yao2',
+}
+
+const AVATAR_IDS = {
+  aline: '003760f2-027b-4259-93ef-fbd8cf3ceac3',
+  chase: 'f67abeed-9640-44e6-b49e-2b02a23158f0',
+}
+
 // ── SYSTEM PROMPTS ────────────────────────────────────────────────
 const SYSTEM_PROMPTS = {
   aline: `You are Aline de Luz Costa.
@@ -100,30 +111,75 @@ Does this response have an agenda? If yes, identify the agenda, remove the mecha
 Chase wants absolutely nothing from the user. Not their healing. Not their performance. Not their continued attendance. Nothing.`
 }
 
-// ── SERVER SETUP ──────────────────────────────────────────────────
-const server = http.createServer((req, res) => {
+// ── HTTP SERVER ───────────────────────────────────────────────────
+const server = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    return res.end()
+  }
+
   if (req.url === '/health') {
-    res.writeHead(200)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ status: 'ok', personas: Object.keys(SYSTEM_PROMPTS) }))
   }
-  res.writeHead(200)
+
+  if (req.url.startsWith('/simli-session')) {
+    const url = new URL(req.url, 'http://localhost')
+    const personaId = url.searchParams.get('persona') || 'aline'
+    const avatarId = AVATAR_IDS[personaId] || AVATAR_IDS.aline
+
+    try {
+      const simliRes = await fetch('https://api.simli.ai/startAudioToVideoSession', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Simli-API-Key': process.env.SIMLI_API_KEY,
+        },
+        body: JSON.stringify({
+          face_id: avatarId,
+          sync_audio: true,
+        }),
+      })
+
+      if (!simliRes.ok) {
+        const text = await simliRes.text()
+        console.error('Simli API error:', text)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ error: 'Simli session failed' }))
+      }
+
+      const data = await simliRes.json()
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify(data))
+    } catch (err) {
+      console.error('Simli session error:', err)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'Simli session failed' }))
+    }
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({
     service: 'Persona iO Voice Backend',
     personas: Object.keys(SYSTEM_PROMPTS),
-    version: '2.0.0',
+    version: '2.1.0',
   }))
 })
 
 const wss = new WebSocket.Server({ server })
 
-// ── CONNECTION HANDLER ─────────────────────────────────────────────
+// ── CONNECTION HANDLER ────────────────────────────────────────────
 wss.on('connection', (ws, req) => {
-  // Determine persona from URL query param: ws://host/?persona=chase
   const url = new URL(req.url, 'http://localhost')
   const personaId = url.searchParams.get('persona') || 'aline'
   const systemPrompt = SYSTEM_PROMPTS[personaId] || SYSTEM_PROMPTS.aline
+  const voiceId = VOICE_IDS[personaId] || VOICE_IDS.aline
 
-  console.log(`[${new Date().toISOString()}] Connection opened — persona: ${personaId}`)
+  console.log(`[${new Date().toISOString()}] Connection — persona: ${personaId}, voice: ${voiceId}`)
 
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY)
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -133,7 +189,7 @@ wss.on('connection', (ws, req) => {
   let currentTranscript = ''
   let processingResponse = false
 
-  // ── DEEPGRAM SETUP ──
+  // ── DEEPGRAM ──
   function initDeepgram() {
     const connection = deepgram.listen.live({
       model: 'nova-2',
@@ -145,18 +201,15 @@ wss.on('connection', (ws, req) => {
     })
 
     connection.on('open', () => {
-      console.log(`Deepgram connected for ${personaId}`)
+      console.log(`Deepgram connected — ${personaId}`)
       ws.send(JSON.stringify({ type: 'status', message: 'listening' }))
     })
 
     connection.on('Results', (data) => {
       const transcript = data.channel?.alternatives?.[0]?.transcript
       if (!transcript) return
-
       const isFinal = data.is_final
-
       ws.send(JSON.stringify({ type: 'transcript', text: transcript, isFinal }))
-
       if (isFinal && transcript.trim()) {
         currentTranscript = transcript.trim()
       }
@@ -167,27 +220,20 @@ wss.on('connection', (ws, req) => {
       const userText = currentTranscript
       currentTranscript = ''
       processingResponse = true
-
       ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
       await generateResponse(userText)
       processingResponse = false
     })
 
-    connection.on('error', (err) => {
-      console.error('Deepgram error:', err)
-    })
-
-    connection.on('close', () => {
-      console.log('Deepgram connection closed')
-    })
+    connection.on('error', (err) => console.error('Deepgram error:', err))
+    connection.on('close', () => console.log('Deepgram closed'))
 
     return connection
   }
 
-  // ── AI RESPONSE ──
+  // ── ANTHROPIC ──
   async function generateResponse(userText) {
-    console.log(`[${personaId}] Processing message: "${userText}"`)
-    
+    console.log(`[${personaId}] "${userText}"`)
     conversationHistory.push({ role: 'user', content: userText })
 
     let fullResponse = ''
@@ -207,27 +253,23 @@ wss.on('connection', (ws, req) => {
           const text = chunk.delta.text
           fullResponse += text
           textBuffer += text
-
           ws.send(JSON.stringify({ type: 'response_text', text }))
 
-          // Send to TTS when we have a complete sentence
           if (/[.!?]/.test(textBuffer) && textBuffer.length > 20) {
-            await sendToElevenLabs(textBuffer.trim())
+            await sendToElevenLabs(textBuffer.trim(), voiceId)
             textBuffer = ''
           }
         }
       }
 
-      // Send any remaining text
       if (textBuffer.trim()) {
-        await sendToElevenLabs(textBuffer.trim())
+        await sendToElevenLabs(textBuffer.trim(), voiceId)
       }
 
       conversationHistory.push({ role: 'assistant', content: fullResponse })
       ws.send(JSON.stringify({ type: 'response_complete' }))
       ws.send(JSON.stringify({ type: 'status', message: 'listening' }))
-
-      console.log(`[${personaId}] Response completed: "${fullResponse}"`)
+      console.log(`[${personaId}] Complete: "${fullResponse}"`)
 
     } catch (err) {
       console.error(`[${personaId}] Anthropic error:`, err)
@@ -235,13 +277,13 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  // ── ELEVENLABS TTS ──
-  async function sendToElevenLabs(text) {
+  // ── ELEVENLABS — PCM 16kHz mono (required for Simli) ──
+  async function sendToElevenLabs(text, voiceId) {
     if (!text.trim()) return
 
     try {
       const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}/stream`,
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=pcm_16000`,
         {
           method: 'POST',
           headers: {
@@ -262,7 +304,7 @@ wss.on('connection', (ws, req) => {
       )
 
       if (!response.ok) {
-        console.error('ElevenLabs error:', response.statusText)
+        console.error(`ElevenLabs error [${voiceId}]:`, response.statusText)
         return
       }
 
@@ -279,108 +321,80 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  // ── MESSAGE HANDLER (ENHANCED FOR BUFFER AND STRING HANDLING) ──
+  // ── MESSAGE HANDLER ──
   ws.on('message', (data) => {
-    // Convert buffer to string if needed for JSON messages
     let messageData = data
     if (Buffer.isBuffer(data)) {
       try {
-        // Try to convert buffer to string for JSON parsing
         messageData = data.toString('utf8')
-        // If it looks like JSON, parse it
         if (messageData.startsWith('{')) {
           const msg = JSON.parse(messageData)
-          
-          // Handle ping/pong
           if (msg.type === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }))
             return
           }
-          
-          // Handle text messages from web interface
-          if (msg.type === 'message' && msg.content && msg.content.trim()) {
-            console.log(`[${personaId}] Received text message: "${msg.content}"`)
+          if (msg.type === 'message' && msg.content?.trim()) {
             if (!processingResponse) {
               currentTranscript = msg.content.trim()
               processingResponse = true
-              
               ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
               generateResponse(currentTranscript)
-                .then(() => {
-                  processingResponse = false
-                })
+                .then(() => { processingResponse = false })
                 .catch(err => {
-                  console.error(`[${personaId}] Response error:`, err)
+                  console.error(`[${personaId}] Error:`, err)
                   processingResponse = false
                 })
             }
             return
           }
         }
-      } catch (parseError) {
-        // If JSON parsing fails, treat as binary audio data
-        // Fall through to audio handling below
+      } catch {
+        // Not JSON — binary audio, fall through
       }
     }
-    
-    // Handle string JSON messages
+
     if (typeof data === 'string') {
       try {
         const msg = JSON.parse(data)
-        
-        // Handle ping/pong
         if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }))
           return
         }
-        
-        // Handle text messages from web interface
-        if (msg.type === 'message' && msg.content && msg.content.trim()) {
-          console.log(`[${personaId}] Received text message: "${msg.content}"`)
+        if (msg.type === 'message' && msg.content?.trim()) {
           if (!processingResponse) {
             currentTranscript = msg.content.trim()
             processingResponse = true
-            
             ws.send(JSON.stringify({ type: 'status', message: 'thinking' }))
             generateResponse(currentTranscript)
-              .then(() => {
-                processingResponse = false
-              })
+              .then(() => { processingResponse = false })
               .catch(err => {
-                console.error(`[${personaId}] Response error:`, err)
+                console.error(`[${personaId}] Error:`, err)
                 processingResponse = false
               })
           }
           return
         }
-      } catch (parseError) {
-        console.error(`[${personaId}] JSON parse error:`, parseError)
+      } catch (err) {
+        console.error(`[${personaId}] Parse error:`, err)
       }
     }
 
-    // Binary audio data - forward to Deepgram
-    if (!deepgramConnection) {
-      deepgramConnection = initDeepgram()
-    }
-
-    if (deepgramConnection.getReadyState() === 1) {
-      deepgramConnection.send(data)
-    }
+    // Binary audio — forward to Deepgram
+    if (!deepgramConnection) deepgramConnection = initDeepgram()
+    if (deepgramConnection.getReadyState() === 1) deepgramConnection.send(data)
   })
 
   ws.on('close', () => {
-    console.log(`[${personaId}] Connection closed`)
+    console.log(`[${personaId}] Closed`)
     deepgramConnection?.finish()
   })
 
-  ws.on('error', (err) => {
-    console.error(`[${personaId}] WebSocket error:`, err)
-  })
+  ws.on('error', (err) => console.error(`[${personaId}] WS error:`, err))
 })
 
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002
 server.listen(PORT, () => {
-  console.log(`Persona iO Backend v2.0 running on port ${PORT}`)
-  console.log(`Personas available: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
+  console.log(`Persona iO Backend v2.1.0 on port ${PORT}`)
+  console.log(`Personas: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
 })
