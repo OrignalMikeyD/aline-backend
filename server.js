@@ -151,9 +151,18 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ error: 'Simli session failed' }))
       }
 
-      const data = await simliRes.json()
+      const sessionData = await simliRes.json()
+
+      // Also fetch ICE servers
+      const iceRes = await fetch('https://api.simli.ai/getIceServers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: process.env.SIMLI_API_KEY }),
+      })
+      const iceData = iceRes.ok ? await iceRes.json() : { iceServers: [] }
+
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      return res.end(JSON.stringify(data))
+      return res.end(JSON.stringify({ ...sessionData, iceServers: iceData.iceServers || iceData }))
     } catch (err) {
       console.error('Simli session error:', err)
       res.writeHead(500, { 'Content-Type': 'application/json' })
