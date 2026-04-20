@@ -320,9 +320,26 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  // ── ELEVENLABS — PCM 16kHz mono (required for Simli) ──
+ // ── ELEVENLABS — PCM 16kHz mono (required for Simli) ──
   async function sendToElevenLabs(text, voiceId) {
     if (!text.trim()) return
+
+    // Strip markdown before TTS so ElevenLabs doesn't read asterisks, underscores,
+    // hashes, or backticks aloud. Preserves sentence content and punctuation.
+    text = text
+      .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // ***bold italic***
+      .replace(/\*\*([^*]+)\*\*/g, '$1')      // **bold**
+      .replace(/\*([^*]+)\*/g, '$1')          // *italic*
+      .replace(/___([^_]+)___/g, '$1')        // ___bold italic___
+      .replace(/__([^_]+)__/g, '$1')          // __bold__
+      .replace(/_([^_]+)_/g, '$1')            // _italic_
+      .replace(/```[^`]*```/g, '')            // code blocks (remove entirely)
+      .replace(/`([^`]+)`/g, '$1')            // inline code
+      .replace(/^#{1,6}\s+/gm, '')            // headers (# ## ### etc)
+      .replace(/~~([^~]+)~~/g, '$1')          // ~~strikethrough~~
+      .trim()
+
+    if (!text) return
 
     try {
       const response = await fetch(
