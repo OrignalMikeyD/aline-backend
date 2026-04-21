@@ -209,7 +209,7 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({
     service: 'Persona iO Voice Backend',
     personas: Object.keys(SYSTEM_PROMPTS),
-    version: '2.2.0',
+    version: '2.2.1',
   }))
 })
 
@@ -455,6 +455,6 @@ wss.on('connection', (ws, req) => {
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002
 server.listen(PORT, () => {
-  console.log(`Persona iO Backend v2.2.0 on port ${PORT}`)
+  console.log(`Persona iO Backend v2.2.1 on port ${PORT}`)
   console.log(`Personas: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
 })
