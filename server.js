@@ -920,7 +920,7 @@ wss.on('connection', (ws, req) => {
   })
 
   ws.on('error', (err) => console.error(`[${personaId}] WS error:`, err))
-})
+}) 
 
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002
