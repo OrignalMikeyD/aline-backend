@@ -14,7 +14,35 @@ const AVATAR_IDS = {
   chase: 'f67abeed-9640-44e6-b49e-2b02a23158f0',
 }
 
-// ── SYSTEM PROMPTS — Persona iO v3.1.2 ────────────────────────────
+// ── SYSTEM PROMPTS — Persona iO v3.2.0 ────────────────────────────
+// v3.2.0 changes from v3.1.2:
+//
+//   1. WEB SEARCH WIRING. Anthropic's native web_search tool is now
+//      wired into anthropic.messages.stream(). The tools parameter
+//      passes web_search_20250305 with max_uses: 3. Claude decides
+//      when to search based on the WHEN YOU SEARCH section in each
+//      character's prompt (added in v3.1.2). Search results are
+//      filtered through each character's throughlines before they
+//      reach the user.
+//
+//   2. STREAMING LOOP — NO CHANGES NEEDED. The existing filter
+//      `chunk.delta.type === 'text_delta'` already correctly
+//      isolates text content from tool_use input_json_delta and
+//      web_search_tool_result blocks. Tool calls happen inside a
+//      single completion (server-side execution), so conversation
+//      history only needs the final text response, which is what
+//      we already store.
+//
+//   3. UX NOTE. When Claude searches, the user sees the "thinking"
+//      status for 1–3 seconds longer than usual. That's the search
+//      latency. Acceptable for launch. A future v3.3 could add a
+//      "searching" status for tighter UX.
+//
+//   4. COST NOTE. Web search is metered at roughly $10 per 1,000
+//      searches on top of token costs. At max_uses: 3 per turn,
+//      worst case is ~$0.03 per turn. Average expected cost is
+//      well under $0.01 per turn.
+//
 // v3.1.2 changes from v3.1.1:
 //
 //   1. WHEN YOU SEARCH section added to Aline's SERVICE ON REQUEST,
@@ -33,11 +61,7 @@ const AVATAR_IDS = {
 //      specific things in character register, never list-dump, default
 //      to honesty when search returns nothing useful.
 //
-//   IMPORTANT: This prompt change requires the backend.js wiring
-//   (tools parameter on anthropic.messages.stream() + streaming loop
-//   update for tool_use blocks). Do NOT deploy this prompt to
-//   production until backend wiring is in place. The backend code
-//   change ships in v3.2.0.
+//   The corresponding backend wiring lands in v3.2.0 (next section up).
 //
 // v3.1.1 changes from v3.1.0:
 //
@@ -1677,7 +1701,7 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({
     service: 'Persona iO Voice Backend',
     personas: Object.keys(SYSTEM_PROMPTS),
-    version: '3.1.2',
+    version: '3.2.0',
   }))
 })
 
@@ -1755,6 +1779,17 @@ wss.on('connection', (ws, req) => {
         max_tokens: 400,
         system: systemPrompt,
         messages: conversationHistory,
+        // Web search wiring (v3.2.0). Claude decides when to search
+        // based on the WHEN YOU SEARCH section in each character's
+        // system prompt. Server-side execution: tool_use, tool_result,
+        // and final text all stream within a single completion.
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 3,
+          },
+        ],
       })
 
       let textBuffer = ''
@@ -1923,6 +1958,6 @@ wss.on('connection', (ws, req) => {
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002
 server.listen(PORT, () => {
-  console.log(`Persona iO Backend v3.1.2 on port ${PORT}`)
+  console.log(`Persona iO Backend v3.2.0 on port ${PORT}`)
   console.log(`Personas: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
 })
