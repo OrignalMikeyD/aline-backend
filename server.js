@@ -1876,7 +1876,11 @@ wss.on('connection', (ws, req) => {
         const { done, value } = await reader.read()
         if (done) break
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(value.buffer)
+          // FIX: send the exact chunk bytes (value), not the whole underlying
+          // ArrayBuffer (value.buffer). value.buffer can be larger than the chunk
+          // and drags trailing bytes that Simli plays as static. This is the
+          // scratchy-audio fix. Was: ws.send(value.buffer)
+          ws.send(value)
         }
       }
     } catch (err) {
