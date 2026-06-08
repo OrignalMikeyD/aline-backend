@@ -14,7 +14,23 @@ const AVATAR_IDS = {
   chase: 'f67abeed-9640-44e6-b49e-2b02a23158f0',
 }
 
-// ── SYSTEM PROMPTS — Persona iO v3.2.0 ────────────────────────────
+// ── SYSTEM PROMPTS — Persona iO v3.3.0 ────────────────────────────
+// v3.3.0 changes from v3.2.0:
+//
+//   1. DEMO SEARCH ISOLATION. The connection handler now reads a
+//      `demo` query flag (?demo=1). When present, the Anthropic call
+//      omits the web_search tool, so the public demo runs formation-only.
+//      Rationale: under tool results the model drifts out of persona
+//      (citation dumping, over-length, mid-sentence truncation at the
+//      token ceiling). The demo is the public, reviewer-facing surface,
+//      so it stays in character by running without search. The real
+//      /session paths connect without the flag and keep full web search
+//      unchanged.
+//
+//   2. generateResponse now builds a streamConfig object and attaches
+//      the tools array only when !isDemo, rather than hardcoding tools
+//      into the stream() call.
+//
 // v3.2.0 changes from v3.1.2:
 //
 //   1. WEB SEARCH WIRING. Anthropic's native web_search tool is now
@@ -1701,7 +1717,7 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({
     service: 'Persona iO Voice Backend',
     personas: Object.keys(SYSTEM_PROMPTS),
-    version: '3.2.0',
+    version: '3.3.0',
   }))
 })
 
@@ -1711,10 +1727,15 @@ const wss = new WebSocket.Server({ server })
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost')
   const personaId = url.searchParams.get('persona') || 'aline'
+  // Demo flag (v3.3.0). The public demo connects with ?demo=1 and runs
+  // formation-only (no web search), because under tool results the model
+  // drifts out of persona. The real /session paths omit the flag and keep
+  // full web search.
+  const isDemo = url.searchParams.get('demo') === '1'
   const systemPrompt = SYSTEM_PROMPTS[personaId] || SYSTEM_PROMPTS.aline
   const voiceId = VOICE_IDS[personaId] || VOICE_IDS.aline
 
-  console.log(`[${new Date().toISOString()}] Connection — persona: ${personaId}, voice: ${voiceId}`)
+  console.log(`[${new Date().toISOString()}] Connection — persona: ${personaId}, voice: ${voiceId}, demo: ${isDemo}`)
 
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY)
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -1774,23 +1795,25 @@ wss.on('connection', (ws, req) => {
     let fullResponse = ''
 
     try {
-      const stream = await anthropic.messages.stream({
+      const streamConfig = {
         model: process.env.MODEL_NAME || 'claude-sonnet-4-20250514',
         max_tokens: 400,
         system: systemPrompt,
         messages: conversationHistory,
-        // Web search wiring (v3.2.0). Claude decides when to search
-        // based on the WHEN YOU SEARCH section in each character's
-        // system prompt. Server-side execution: tool_use, tool_result,
-        // and final text all stream within a single completion.
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: 3,
-          },
-        ],
-      })
+      }
+
+      // Search on for the real product, off for the public demo (v3.3.0).
+      // Under tool results the model drifts out of persona (citation
+      // dumping, over-length, mid-sentence truncation at the token ceiling),
+      // so the Netflix-facing demo runs formation-only. The /session paths
+      // connect without ?demo=1 and keep full web search.
+      if (!isDemo) {
+        streamConfig.tools = [
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+        ]
+      }
+
+      const stream = await anthropic.messages.stream(streamConfig)
 
       let textBuffer = ''
 
@@ -1962,6 +1985,6 @@ wss.on('connection', (ws, req) => {
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002
 server.listen(PORT, () => {
-  console.log(`Persona iO Backend v3.2.0 on port ${PORT}`)
+  console.log(`Persona iO Backend v3.3.0 on port ${PORT}`)
   console.log(`Personas: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
 })
