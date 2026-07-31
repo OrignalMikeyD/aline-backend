@@ -121,6 +121,15 @@ const AVATAR_IDS = {
 //   4. Aline prompt unchanged from v2.9.5.
 //
 //   5. Voice config (ElevenLabs) unchanged.
+
+// ── MODEL ─────────────────────────────────────────────────────────
+// No fallback by design. A stale hardcoded model string fails only at
+// request time, so the service boots green and every session breaks
+// silently. Fail at startup instead, where Railway will show it.
+const MODEL_NAME = process.env.MODEL_NAME
+if (!MODEL_NAME) {
+  throw new Error('MODEL_NAME is not set. Set it in Railway under Variables.')
+}
 const SYSTEM_PROMPTS = {
   aline: `You are Aline de Luz Costa.
 
@@ -1796,7 +1805,7 @@ wss.on('connection', (ws, req) => {
 
     try {
       const streamConfig = {
-        model: process.env.MODEL_NAME || 'claude-sonnet-4-20250514',
+        model: MODEL_NAME, // set in Railway; currently claude-sonnet-4-6
         max_tokens: 400,
         system: systemPrompt,
         messages: conversationHistory,
@@ -1805,7 +1814,7 @@ wss.on('connection', (ws, req) => {
       // Search on for the real product, off for the public demo (v3.3.0).
       // Under tool results the model drifts out of persona (citation
       // dumping, over-length, mid-sentence truncation at the token ceiling),
-      // so the Netflix-facing demo runs formation-only. The /session paths
+      // so the public demo runs formation-only. The /session paths
       // connect without ?demo=1 and keep full web search.
       if (!isDemo) {
         streamConfig.tools = [
@@ -1986,5 +1995,6 @@ wss.on('connection', (ws, req) => {
 const PORT = process.env.PORT || 3002
 server.listen(PORT, () => {
   console.log(`Persona iO Backend v3.3.0 on port ${PORT}`)
+  console.log(`Model: ${MODEL_NAME}`)
   console.log(`Personas: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`)
 })

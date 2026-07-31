@@ -20,7 +20,7 @@ Railway runs one command, `node server.js`, defined in `railway.toml`. Everythin
 
 **Scaffold.** `app/`, `lib/`, `types/`, and `middleware.ts` are a Next.js structure with login, a dashboard, and a Supabase client. `package.json` defines no Next build or dev script, so none of it runs from this repository.
 
-`ARCHITECTURE.md` specifies the integrated version, where the classifier and the invariant gate sit inside the response path. That document is a target, not a description of the running service. Read it as the plan.
+`TARGET_ARCHITECTURE.md` specifies the integrated version, where the classifier and the invariant gate sit inside the response path. That document is a target, not a description of the running service. Read it as the plan.
 
 ## Stack
 
